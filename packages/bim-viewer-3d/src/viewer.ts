@@ -1671,11 +1671,17 @@ export class ModelViewer3D {
   camera3dState(): View3dCamera | null {
     if (this.mode === "plan") return null;
     const camera = this.camera3d();
+    camera.updateMatrixWorld();
     const target = new THREE.Vector3();
     this.controls.getTarget(target);
+    // An off-centre orbit pin moves `controls.getTarget()` to the pivot while keeping the picture
+    // still via a focal offset. Project onto the camera's true viewing axis so saving and restoring
+    // (with the focal offset cleared) preserves the exact viewing direction on the first round trip.
+    const dist = Math.max(camera.position.distanceTo(target), 0.01);
+    const ahead = camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), dist);
     const k = (v: THREE.Vector3) => ({ x: v.x / MM, y: -v.z / MM, z: v.y / MM });
     const ortho = this.orthoView;
-    return { eye: k(camera.position), target: k(target), up: { x: 0, y: 0, z: 1 }, fovDeg: this.perspective.fov, orthoHeightMm: (ortho.top - ortho.bottom) / ortho.zoom / MM };
+    return { eye: k(camera.position), target: k(ahead), up: { x: 0, y: 0, z: 1 }, fovDeg: this.perspective.fov, orthoHeightMm: (ortho.top - ortho.bottom) / ortho.zoom / MM };
   }
 
   /** Where the plan camera looks and how far it is zoomed; null outside plan. `setPlanCamera` puts it back. */

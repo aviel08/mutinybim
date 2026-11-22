@@ -25,6 +25,16 @@ describe('camera placement gate', () => {
     expect(placing.inFlight).toBe(false)
   })
 
+  it('a newer placement finishing before an older one still keeps the gate closed until both finish', () => {
+    const placing = new CameraPlacement()
+    const first = placing.start()
+    const second = placing.start()
+    placing.finish(second)
+    expect(placing.inFlight).toBe(true)
+    placing.finish(first)
+    expect(placing.inFlight).toBe(false)
+  })
+
   it('finishing an unknown token changes nothing', () => {
     const placing = new CameraPlacement()
     placing.start()

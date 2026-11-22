@@ -759,7 +759,9 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       viewer.setAuthoredLevels(shown.levels)
       if (view.viewType === 'floor_plan' || view.viewType === 'ceiling_plan') {
         await viewer.setVerticalSection(null)
+        if (cancelled) return
         await viewer.isolateLevel(props.level ?? null)
+        if (cancelled) return
         const cut = livePlanCutMm(current, view, floor)
         viewer.setMode('plan', cut)
         viewer.setPlanCut(cut)
@@ -768,12 +770,15 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         if (!cancelled) viewer.setPlanCrop(props.cropView === false ? null : { min: view.cropMin, max: view.cropMax })
       } else if ((view.viewType === 'section' || view.viewType === 'elevation') && props.section) {
         await viewer.isolateLevel(null)
+        if (cancelled) return
         await viewer.setVerticalSection({ ...props.section, eyeElevationMm: floor + 1600 })
       } else if (view.viewType === 'three_d') {
         await viewer.setVerticalSection(null)
+        if (cancelled) return
         viewer.setMode('3d')
         viewer.setPlanCrop(null)
         await viewer.isolateLevel(props.level ?? null)
+        if (cancelled) return
         // The 3D crop box itself is applied by useCrop3d.
         // Where this person left this view last, else the view's own camera (what prints).
         const camera = cameraFor(view.id) ?? viewCamera3d(current, view)

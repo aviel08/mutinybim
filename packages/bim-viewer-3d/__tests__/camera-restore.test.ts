@@ -3,6 +3,7 @@
  */
 import * as THREE from "three";
 import { makeCameraControls } from "../src/navigation";
+import { ModelViewer3D } from "../src/viewer";
 
 function element(): HTMLElement {
   const el = document.createElement("div");
@@ -57,6 +58,47 @@ describe("restoring a camera over a pinned orbit point", () => {
     controls.setOrbitPoint(0, 0, 0);
     controls.update(0);
     settle(controls);
+    expect(aimOffset(cam, new THREE.Vector3(0, 0, 0))).toBeLessThan(1e-6);
+  });
+
+  it("ModelViewer3D camera3dState -> setCamera3d preserves exact viewing direction after an off-centre pin on the first round trip", async () => {
+    const cam = perspective();
+    const orthoView = new THREE.OrthographicCamera(-50, 50, 50, -50, -5000, 5000);
+    const controls = makeCameraControls(cam, element());
+    void controls.setLookAt(40, 30, 40, 0, 0, 0, false);
+    settle(controls);
+    cam.updateMatrixWorld();
+    const beforePos = cam.position.clone();
+    const beforeDir = cam.getWorldDirection(new THREE.Vector3());
+
+    // Pin an off-centre orbit point: camera-controls moves controls.target to the pivot and
+    // holds the picture still with a focal offset.
+    controls.setOrbitPoint(5, 1, -3);
+    settle(controls);
+
+    const viewer = Object.create(ModelViewer3D.prototype) as ModelViewer3D;
+    Object.assign(viewer, {
+      mode: "3d",
+      projection: "perspective",
+      perspective: cam,
+      orthoView,
+      controls,
+      orbitPointPinned: true,
+      fovDirty: false,
+      cameraListeners: new Set<() => void>(),
+      cameraSettledListeners: new Set<() => void>(),
+      fragments: { update: jest.fn(async () => undefined) },
+    });
+
+    // Snapshot while the off-centre pin is active, then restore via production setCamera3d.
+    const saved = viewer.camera3dState();
+    expect(saved).not.toBeNull();
+    await viewer.setCamera3d(saved!, false);
+    settle(controls);
+    cam.updateMatrixWorld();
+
+    expect(cam.position.distanceTo(beforePos)).toBeLessThan(1e-4);
+    expect(cam.getWorldDirection(new THREE.Vector3()).angleTo(beforeDir)).toBeLessThan(1e-6);
     expect(aimOffset(cam, new THREE.Vector3(0, 0, 0))).toBeLessThan(1e-6);
   });
 });
