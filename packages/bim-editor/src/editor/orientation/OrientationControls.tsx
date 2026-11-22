@@ -43,6 +43,8 @@ export const THREE_QUARTER_VIEWS: ReadonlyArray<{ readonly label: string; readon
 ]
 
 const RAD_TO_DEG = 180 / Math.PI
+/** Keys that adjust a slider thumb; stop them from bubbling to the menu's roving focus or the window's geometry nudge, while leaving Escape and Tab alone. */
+const SLIDER_ADJUST_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'])
 
 interface Props {
   readonly viewer: Pick<ModelViewer3D, 'orientation' | 'onCameraChange' | 'orientTo' | 'orbitBy' | 'frame' | 'camera3dState' | 'setFovDeg'>
@@ -211,7 +213,13 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
               ))}
             </DropdownMenuRadioGroup>
             {/* A plain row, not a menu item: dragging the slider must not close the menu. */}
-            <div className="px-2 py-1.5" data-testid="orientation-fov">
+            <div
+              className="px-2 py-1.5"
+              data-testid="orientation-fov"
+              onKeyDown={(e) => {
+                if (SLIDER_ADJUST_KEYS.has(e.key)) e.stopPropagation()
+              }}
+            >
               <div className={cn('flex items-center justify-between gap-2 pb-1.5', projection === 'orthographic' && 'opacity-60')}>
                 <span
                   className="text-xs font-normal text-muted-foreground"
@@ -232,7 +240,12 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
                   const next = values[0]
                   if (next === undefined) return
                   setFovDeg(next)
-                  viewer.setFovDeg(next)
+                  viewer.setFovDeg(next, { settle: false })
+                }}
+                onValueCommit={(values) => {
+                  const next = values[0]
+                  if (next === undefined) return
+                  viewer.setFovDeg(next, { settle: true })
                 }}
               />
             </div>

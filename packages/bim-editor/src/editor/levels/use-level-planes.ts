@@ -73,10 +73,16 @@ export function useLevelPlanes({
   useEffect(() => planes?.setVisible(show), [planes, show])
   useEffect(() => planes?.setHighlighted(highlightedId), [planes, highlightedId])
 
-  // The FOV slider and saved 3D cameras change the lens angle; the labels rescale to keep their screen size.
+  // Perspective FOV changes and orthographic zooms change how sprites project; rescale labels to keep their screen size.
   useEffect(() => {
     if (!viewer || !planes) return
-    const sync = () => planes.setFovDeg(viewer.getFovDeg())
+    const sync = () => {
+      if (viewer.getProjection() === 'orthographic') {
+        planes.setCamera({ projection: 'orthographic', orthoHeightMm: viewer.getOrthoHeightMm() })
+      } else {
+        planes.setCamera({ projection: 'perspective', fovDeg: viewer.getFovDeg() })
+      }
+    }
     sync()
     return viewer.onCameraChange(sync)
   }, [viewer, planes])

@@ -2048,7 +2048,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
-        if (ids.length > 0 && isNudgeKey(e.key)) {
+        if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
           e.preventDefault()
           setToolHint(session.nudgeSelection(ids, e.key, e.shiftKey))
           return

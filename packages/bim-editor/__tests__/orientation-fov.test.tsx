@@ -59,9 +59,9 @@ function openMenu() {
   fireEvent.click(trigger)
 }
 
-/** The slider thumb carries role="slider"; the row is its stable scope. */
+/** The slider thumb carries role="slider" and its accessible name directly. */
 function fovSlider() {
-  return within(screen.getByTestId('orientation-fov')).getByRole('slider')
+  return screen.getByRole('slider', { name: 'Field of view in degrees' })
 }
 
 describe('orientation menu: field of view', () => {
@@ -77,23 +77,39 @@ describe('orientation menu: field of view', () => {
     expect(slider.getAttribute('aria-valuenow')).toBe('40')
   })
 
-  it('the arrow keys step the angle and tell the viewer, without closing the menu', async () => {
+  it('the arrow keys step the angle and settle camera memory, without closing the menu or bubbling to window nudge shortcuts', async () => {
     const viewer = renderControls(40)
-    openMenu()
-    const slider = await within(await screen.findByTestId('orientation-fov')).getByRole('slider')
-    fireEvent.keyDown(slider, { key: 'ArrowRight' })
-    fireEvent.keyDown(slider, { key: 'ArrowRight' })
-    expect(viewer.setFovDeg).toHaveBeenCalledWith(41)
-    expect(viewer.setFovDeg).toHaveBeenCalledWith(42)
-    // Dragging or stepping the slider must not close the menu behind the person's hand.
-    expect(screen.getByTestId('orientation-fov')).toBeDefined()
+    const windowKeys: string[] = []
+    const onWindowKey = (e: KeyboardEvent) => windowKeys.push(e.key)
+    window.addEventListener('keydown', onWindowKey)
+    try {
+      openMenu()
+      await screen.findByTestId('orientation-fov')
+      const slider = fovSlider()
+      fireEvent.keyDown(slider, { key: 'ArrowRight' })
+      fireEvent.keyDown(slider, { key: 'ArrowRight' })
+      fireEvent.keyDown(slider, { key: 'PageUp' })
+      expect(viewer.setFovDeg).toHaveBeenCalledWith(41, { settle: false })
+      expect(viewer.setFovDeg).toHaveBeenCalledWith(41, { settle: true })
+      expect(viewer.setFovDeg).toHaveBeenCalledWith(42, { settle: false })
+      expect(viewer.setFovDeg).toHaveBeenCalledWith(42, { settle: true })
+      // Slider adjustment keys must never reach the global window handler that nudges selected geometry.
+      expect(windowKeys).toEqual([])
+      // Dragging or stepping the slider must not close the menu behind the person's hand.
+      expect(screen.getByTestId('orientation-fov')).toBeDefined()
+      // Escape still bubbles to dismiss the menu cleanly.
+      fireEvent.keyDown(slider, { key: 'Escape' })
+      expect(windowKeys).toContain('Escape')
+    } finally {
+      window.removeEventListener('keydown', onWindowKey)
+    }
   })
 
   it('grays the slider out in orthographic, where the lens angle does nothing', async () => {
     const viewer = renderControls(40, 'orthographic')
     openMenu()
     const row = await screen.findByTestId('orientation-fov')
-    const slider = within(row).getByRole('slider')
+    const slider = within(row).getByRole('slider', { name: 'Field of view in degrees' })
     expect(row.querySelector('[data-slot="slider"]')?.hasAttribute('data-disabled')).toBe(true)
     fireEvent.keyDown(slider, { key: 'ArrowRight' })
     expect(viewer.setFovDeg).not.toHaveBeenCalled()

@@ -99,13 +99,18 @@ export interface LevelPlaneColors {
   readonly background: string;
 }
 
+/** How the active 3D camera projects sprites: perspective by lens angle, orthographic by visible height. */
+export type LevelLabelCamera =
+  | { readonly projection: "perspective"; readonly fovDeg: number }
+  | { readonly projection: "orthographic"; readonly orthoHeightMm: number };
+
 export class LevelPlanes {
   readonly object = new THREE.Group();
   private specs: readonly LevelPlaneSpec[] = [];
   private extent: PlanExtentMm | null = null;
   private highlighted: string | null = null;
-  private fovDeg = LABEL_FOV_CALIBRATION_DEG;
-  /** Label sprites and their canvas aspect ratios, to rescale when the lens angle changes. */
+  private labelCamera: LevelLabelCamera = { projection: "perspective", fovDeg: LABEL_FOV_CALIBRATION_DEG };
+  /** Label sprites and their canvas aspect ratios, to rescale when the camera projection or lens changes. */
   private labels: { readonly sprite: THREE.Sprite; readonly aspect: number }[] = [];
 
   constructor(private colors: LevelPlaneColors) {
@@ -135,17 +140,32 @@ export class LevelPlanes {
     this.object.visible = visible;
   }
 
-  /** Keep the labels the same fraction of the view whatever lens angle the camera carries (the FOV slider, or a saved 3D camera). */
-  setFovDeg(fovDeg: number) {
-    if (Math.abs(fovDeg - this.fovDeg) < 1e-6) return;
-    this.fovDeg = fovDeg;
+  /** Keep the labels the same fraction of the view whatever lens angle or orthographic zoom the camera carries. */
+  setCamera(camera: LevelLabelCamera) {
+    if (
+      camera.projection === this.labelCamera.projection &&
+      (camera.projection === "perspective"
+        ? Math.abs(camera.fovDeg - (this.labelCamera as Extract<LevelLabelCamera, { projection: "perspective" }>).fovDeg) < 1e-6
+        : Math.abs(camera.orthoHeightMm - (this.labelCamera as Extract<LevelLabelCamera, { projection: "orthographic" }>).orthoHeightMm) < 1e-6)
+    ) {
+      return;
+    }
+    this.labelCamera = camera;
     this.applyLabelScales();
   }
 
-  /** Undo the projection's fov scaling: span LABEL_SCREEN_HEIGHT of the view at every angle. */
+  /** Keep the labels the same fraction of the view whatever lens angle a perspective camera carries (the FOV slider, or a saved 3D camera). */
+  setFovDeg(fovDeg: number) {
+    this.setCamera({ projection: "perspective", fovDeg });
+  }
+
+  /** Undo the projection's scaling so labels span the same NDC height in both perspective (scale/tan(fov/2)) and orthographic (scale*2/orthoHeightM). */
   private applyLabelScales() {
-    const k = Math.tan(THREE.MathUtils.degToRad(this.fovDeg) / 2) / LABEL_FOV_CALIBRATION_TAN;
-    for (const { sprite, aspect } of this.labels) sprite.scale.set(LABEL_SCREEN_HEIGHT * aspect * k, LABEL_SCREEN_HEIGHT * k, 1);
+    const height =
+      this.labelCamera.projection === "orthographic"
+        ? (LABEL_SCREEN_HEIGHT / (2 * LABEL_FOV_CALIBRATION_TAN)) * Math.max(1e-3, this.labelCamera.orthoHeightMm) * MM
+        : LABEL_SCREEN_HEIGHT * (Math.tan(THREE.MathUtils.degToRad(this.labelCamera.fovDeg) / 2) / LABEL_FOV_CALIBRATION_TAN);
+    for (const { sprite, aspect } of this.labels) sprite.scale.set(height * aspect, height, 1);
   }
 
   dispose() {
