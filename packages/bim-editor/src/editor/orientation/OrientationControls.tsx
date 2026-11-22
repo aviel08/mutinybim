@@ -15,6 +15,7 @@ import {
   type ViewVector,
 } from '@permitzip/bim-viewer-3d/light'
 import { Button } from '../../ui/button'
+import { cn } from '../../ui/cn'
 import { Slider } from '../../ui/slider'
 import {
   DropdownMenu,
@@ -211,7 +212,7 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
             </DropdownMenuRadioGroup>
             {/* A plain row, not a menu item: dragging the slider must not close the menu. */}
             <div className="px-2 py-1.5" data-testid="orientation-fov">
-              <div className="flex items-center justify-between gap-2 pb-1.5">
+              <div className={cn('flex items-center justify-between gap-2 pb-1.5', projection === 'orthographic' && 'opacity-60')}>
                 <span
                   className="text-xs font-normal text-muted-foreground"
                   title="The perspective camera's lens angle. An orthographic view is not affected until you switch back to perspective."
@@ -225,6 +226,7 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
                 min={5}
                 max={120}
                 step={1}
+                disabled={projection === 'orthographic'}
                 aria-label="Field of view in degrees"
                 onValueChange={(values) => {
                   const next = values[0]

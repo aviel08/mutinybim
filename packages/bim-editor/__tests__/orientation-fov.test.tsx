@@ -33,7 +33,7 @@ function viewerWith(fovDeg: number) {
   }
 }
 
-function renderControls(fovDeg: number) {
+function renderControls(fovDeg: number, projection: 'perspective' | 'orthographic' = 'perspective') {
   const viewer = viewerWith(fovDeg)
   render(
     <TooltipProvider>
@@ -45,7 +45,7 @@ function renderControls(fovDeg: number) {
       onCreatePlan={() => {}}
       onCreateElevation={() => {}}
       trueNorthDeg={0}
-      projection="perspective"
+      projection={projection}
       onProjectionChange={() => {}}
       />
     </TooltipProvider>,
@@ -87,5 +87,15 @@ describe('orientation menu: field of view', () => {
     expect(viewer.setFovDeg).toHaveBeenCalledWith(42)
     // Dragging or stepping the slider must not close the menu behind the person's hand.
     expect(screen.getByTestId('orientation-fov')).toBeDefined()
+  })
+
+  it('grays the slider out in orthographic, where the lens angle does nothing', async () => {
+    const viewer = renderControls(40, 'orthographic')
+    openMenu()
+    const row = await screen.findByTestId('orientation-fov')
+    const slider = within(row).getByRole('slider')
+    expect(row.querySelector('[data-slot="slider"]')?.hasAttribute('data-disabled')).toBe(true)
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    expect(viewer.setFovDeg).not.toHaveBeenCalled()
   })
 })
