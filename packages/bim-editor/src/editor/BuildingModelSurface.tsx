@@ -220,9 +220,6 @@ export type BuildingModelView = '3d' | 'plan' | 'sheet'
 
 export type { BuildingModelTool } from './building-model-ribbon'
 
-/** Space the properties panel takes on the right of the canvas (w-80), so overlays clear it. */
-const PROPERTIES_PANEL_PX = 320
-
 /** Keys typed into a field are the field's, not the view's. */
 function typingInField(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
@@ -3524,7 +3521,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             <OrientationControls
               trueNorthDeg={site.trueNorthDeg}
               viewer={viewer}
-              rightInset={openView || selection ? PROPERTIES_PANEL_PX : 0}
+              rightInset={propertiesOpen ? propertiesWidth : 0}
               canCreateViews={canEdit}
               blockedReason={blockedReason}
               onCreatePlan={() => setRequest({ kind: 'new_view', viewType: 'floor_plan' })}
