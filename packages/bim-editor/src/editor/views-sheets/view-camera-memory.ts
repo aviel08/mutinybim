@@ -20,6 +20,33 @@ export function sameCamera(a: View3dCamera | undefined, b: View3dCamera): boolea
 }
 
 /**
+ * Whether a camera placement is in flight, and for which canvas key. Opening a
+ * view moves the camera in steps (the mode conversion, isolating the level, the
+ * saved camera), and every step settles: a settle that lands while the
+ * placement is still running says where the camera was before the view opened
+ * (the previous view's position), not where this person is — remembering it
+ * would make the view open at the previous view's camera from then on. A newer
+ * placement may start while an older one is still running (a quick click from
+ * one view to the next), so only a placement that is still the current one
+ * clears the flag.
+ */
+export class CameraPlacement {
+  private current: string | null = null
+
+  start(key: string): void {
+    this.current = key
+  }
+
+  finish(key: string): void {
+    if (this.current === key) this.current = null
+  }
+
+  get inFlight(): boolean {
+    return this.current !== null
+  }
+}
+
+/**
  * What re-frames the canvas when a view changes. A 3D view is framed by its
  * saved camera and its level only; hiding a category, a visual style, phases
  * or line weights change what is drawn, never where you are looking (the product owner,
