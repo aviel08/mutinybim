@@ -72,4 +72,12 @@ export function useLevelPlanes({
 
   useEffect(() => planes?.setVisible(show), [planes, show])
   useEffect(() => planes?.setHighlighted(highlightedId), [planes, highlightedId])
+
+  // The FOV slider and saved 3D cameras change the lens angle; the labels rescale to keep their screen size.
+  useEffect(() => {
+    if (!viewer || !planes) return
+    const sync = () => planes.setFovDeg(viewer.getFovDeg())
+    sync()
+    return viewer.onCameraChange(sync)
+  }, [viewer, planes])
 }

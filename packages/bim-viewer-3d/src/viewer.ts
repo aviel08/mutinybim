@@ -1413,6 +1413,11 @@ export class ModelViewer3D {
     for (const listener of this.cameraListeners) listener();
   }
 
+  /** The perspective camera's lens angle, degrees. */
+  getFovDeg(): number {
+    return this.perspective.fov;
+  }
+
   /** Look from `eye` at `target`; a parallel view zooms to frame what a perspective eye there would see. */
   private async lookFrom(eye: THREE.Vector3, target: THREE.Vector3, animate: boolean) {
     const camera = this.camera();

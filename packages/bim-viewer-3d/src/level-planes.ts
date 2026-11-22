@@ -33,6 +33,9 @@ const MM = 0.001;
 /** How far the outline reaches past the building, mm. */
 export const LEVEL_PLANE_MARGIN_MM = 1500;
 const LABEL_SCREEN_HEIGHT = 0.028;
+/** The lens angle the label size was tuned at, degrees. A sprite without size attenuation still scales with the projection (spanning scale/tan(fov/2) of the view), so any other angle rescales it to keep the same screen size. */
+const LABEL_FOV_CALIBRATION_DEG = 45;
+const LABEL_FOV_CALIBRATION_TAN = Math.tan(THREE.MathUtils.degToRad(LABEL_FOV_CALIBRATION_DEG) / 2);
 
 /** Feet and inches for the label: 26'-6". */
 function heightText(mm: number): string {
@@ -101,6 +104,9 @@ export class LevelPlanes {
   private specs: readonly LevelPlaneSpec[] = [];
   private extent: PlanExtentMm | null = null;
   private highlighted: string | null = null;
+  private fovDeg = LABEL_FOV_CALIBRATION_DEG;
+  /** Label sprites and their canvas aspect ratios, to rescale when the lens angle changes. */
+  private labels: { readonly sprite: THREE.Sprite; readonly aspect: number }[] = [];
 
   constructor(private colors: LevelPlaneColors) {
     this.object.name = "level-planes";
@@ -129,12 +135,26 @@ export class LevelPlanes {
     this.object.visible = visible;
   }
 
+  /** Keep the labels the same fraction of the view whatever lens angle the camera carries (the FOV slider, or a saved 3D camera). */
+  setFovDeg(fovDeg: number) {
+    if (Math.abs(fovDeg - this.fovDeg) < 1e-6) return;
+    this.fovDeg = fovDeg;
+    this.applyLabelScales();
+  }
+
+  /** Undo the projection's fov scaling: span LABEL_SCREEN_HEIGHT of the view at every angle. */
+  private applyLabelScales() {
+    const k = Math.tan(THREE.MathUtils.degToRad(this.fovDeg) / 2) / LABEL_FOV_CALIBRATION_TAN;
+    for (const { sprite, aspect } of this.labels) sprite.scale.set(LABEL_SCREEN_HEIGHT * aspect * k, LABEL_SCREEN_HEIGHT * k, 1);
+  }
+
   dispose() {
     this.clear();
     this.object.removeFromParent();
   }
 
   private clear() {
+    this.labels = [];
     for (const child of [...this.object.children]) {
       child.traverse((o) => {
         if (o instanceof THREE.LineLoop) {
@@ -166,11 +186,12 @@ export class LevelPlanes {
       const { texture, aspect } = labelTexture(layout.text, color, this.colors.background);
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, sizeAttenuation: false, depthTest: false, transparent: true }));
       sprite.center.set(0, 0);
-      sprite.scale.set(LABEL_SCREEN_HEIGHT * aspect, LABEL_SCREEN_HEIGHT, 1);
+      this.labels.push({ sprite, aspect });
       sprite.position.set(...layout.label);
       sprite.renderOrder = 6;
       group.add(sprite);
       this.object.add(group);
     }
+    this.applyLabelScales();
   }
 }

@@ -55,4 +55,25 @@ describe("level planes in 3D", () => {
     expect(planes.object.children).toHaveLength(0);
     expect(scene.children).not.toContain(planes.object);
   });
+
+  it("rescales the labels when the lens angle changes, so they span the same fraction of the view at any fov", () => {
+    // jsdom has no 2D canvas; the label only needs one to measure and fill.
+    const ctx = { font: "", fillStyle: "", globalAlpha: 1, textBaseline: "", measureText: () => ({ width: 100 }), fillRect: () => undefined, fillText: () => undefined };
+    jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => ctx as unknown as CanvasRenderingContext2D);
+    const planes = new LevelPlanes({ line: "#334455", highlight: "#ff7a1a", background: "#ffffff" });
+    planes.set([{ id: "l1", name: "Level 1", elevationMm: 0 }], EXTENT);
+    const label = planes.object.children[0]!.children.find((c) => c instanceof THREE.Sprite) as THREE.Sprite;
+    const at45 = label.scale.y;
+    // A sprite without size attenuation spans scale/tan(fov/2) of the view, so the scale must grow with tan(fov/2) to keep its screen size.
+    planes.setFovDeg(90);
+    expect(label.scale.y).toBeCloseTo(at45 * (Math.tan(Math.PI / 4) / Math.tan(THREE.MathUtils.degToRad(45) / 2)), 9);
+    planes.setFovDeg(21);
+    expect(label.scale.y).toBeCloseTo(at45 * (Math.tan(THREE.MathUtils.degToRad(21) / 2) / Math.tan(THREE.MathUtils.degToRad(45) / 2)), 9);
+    // The label keeps its canvas shape: width tracks height (canvas 120x40 after the 20px padding).
+    expect(label.scale.x / label.scale.y).toBeCloseTo(3, 9);
+    // A rebuild keeps the applied angle (a highlighted level redraws its label).
+    planes.setHighlighted("l1");
+    const redrawn = planes.object.children[0]!.children.find((c) => c instanceof THREE.Sprite) as THREE.Sprite;
+    expect(redrawn.scale.y).toBeCloseTo(label.scale.y, 9);
+  });
 });
