@@ -3718,7 +3718,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             </div>
           )}
           {status === 'read_only' && !phase && !showDrawing && (
-            <div className="absolute bottom-3 left-3 max-w-sm">
+            <div className="absolute bottom-24 left-3 max-w-sm">
               <Alert>
                 <Wind />
                 <AlertTitle>View only</AlertTitle>

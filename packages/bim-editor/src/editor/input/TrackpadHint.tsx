@@ -57,5 +57,5 @@ export function TrackpadHint() {
   )
 
   if (!showing) return null
-  return <ToolHintBar text={TRACKPAD_HINT_TEXT} testId="building-model-trackpad-hint" className="bottom-12" />
+  return <ToolHintBar text={TRACKPAD_HINT_TEXT} testId="building-model-trackpad-hint" className="bottom-[5.75rem]" />
 }

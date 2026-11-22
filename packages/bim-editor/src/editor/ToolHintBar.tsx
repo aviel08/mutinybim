@@ -27,6 +27,8 @@ function withKeyChips(text: string) {
  * Product decision, Oct 22: the old card at top-centre sat over the drawing. This floats
  * (absolute, never takes layout space) and ignores the pointer so hovering and
  * dragging under it still reach the canvas; only the expand chevron takes clicks.
+ * Sits at bottom-14, above the selection-locks strip in the bottom-left corner,
+ * so a long hint never slides under it.
  * Key names render as chips without changing the text content tests read.
  */
 export function ToolHintBar({
@@ -54,7 +56,7 @@ export function ToolHintBar({
   }, [text, expanded])
 
   return (
-    <div className={cn('pointer-events-none absolute inset-x-3 bottom-3 z-10 flex justify-center', className)} style={style} data-testid="tool-hint-bar" data-tone={tone}>
+    <div className={cn('pointer-events-none absolute inset-x-3 bottom-14 z-10 flex justify-center', className)} style={style} data-testid="tool-hint-bar" data-tone={tone}>
       <div
         className={cn(
           'flex max-w-2xl min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs backdrop-blur-sm',

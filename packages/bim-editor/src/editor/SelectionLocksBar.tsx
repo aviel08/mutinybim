@@ -32,6 +32,7 @@ interface Props {
 
 /**
  * Compact Revit-style selection-lock + 3D sun/render-quality strip in the bottom-left viewport corner.
+ * Stays the bottom-most chrome row; tool hints float above it (bottom-14) so both stay readable.
  * Uses only `@permitzip/bim-ui` controls and `--mutiny-*` theme tokens.
  */
 export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTogglePin, viewer, is3d = false }: Props): ReactNode {
