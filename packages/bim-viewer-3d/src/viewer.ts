@@ -1399,6 +1399,20 @@ export class ModelViewer3D {
     return this.projection;
   }
 
+  /**
+   * Lens angle of the perspective camera, degrees (clamped to 5..120, the range a
+   * saved 3D camera may store). Felt at once in perspective; an orthographic view
+   * keeps its framing, and the angle applies again on the switch back.
+   */
+  setFovDeg(fovDeg: number) {
+    const clamped = Math.min(120, Math.max(5, fovDeg));
+    if (Math.abs(this.perspective.fov - clamped) <= 1e-6) return;
+    this.perspective.fov = clamped;
+    this.perspective.updateProjectionMatrix();
+    void this.fragments.update(true);
+    for (const listener of this.cameraListeners) listener();
+  }
+
   /** Look from `eye` at `target`; a parallel view zooms to frame what a perspective eye there would see. */
   private async lookFrom(eye: THREE.Vector3, target: THREE.Vector3, animate: boolean) {
     const camera = this.camera();
