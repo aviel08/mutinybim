@@ -588,7 +588,7 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "building.level",
-    summary: "A level at an elevation; returns its id. Every level argument in the kit takes a level's id (this one, or one from ctx.model.levels()); the kit's helpers also take the name of exactly one level the script read (reads.levels: true), and refuse an unknown or shared name with the levels there are.",
+    summary: "A level at an elevation; returns its id. When the script reads the levels (reads.levels: true) and the model already has a level with this name at this elevation, it returns that level's id instead of making a second one (a new model starts with \"Level 1\" at 0). Every level argument in the kit takes a level's id (this one, or one from ctx.model.levels()); the kit's helpers also take the name of exactly one level the script read (reads.levels: true), and refuse an unknown or shared name with the levels there are.",
     signature: "level(ctx: ScriptContext, spec: { name: string; elevation: Measure; id?: string }): string",
     example: layout(`    building.level(ctx, { name: "Level 3", elevation: units.ft(24) });`),
     topics: ["level", "levels", "storey", "floor level", "roof level"],
@@ -669,6 +669,20 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     signature: "elevationView(ctx: ScriptContext, spec: VerticalViewSpec): string",
     example: layout(`${WALLS}\n    const elev = documents.elevationView(ctx, { name: "Restroom North Elevation", from: { x: units.ft(2), y: units.ft(8) }, to: { x: units.ft(12), y: units.ft(8) }, direction: 1, depth: units.ft(10), scale: 24 });\n    const sheet = documents.sheet(ctx, { number: "A-401", name: "Interior Elevations" });\n    documents.place(ctx, sheet, elev, { x: units.mm(400), y: units.mm(300) });`),
     topics: ["view", "elevation", "interior elevation", "exterior elevation", "elevation marker"],
+  },
+  {
+    name: "documents.view3d",
+    summary: "A saved 3D view with its 3D crop box, live projection (`perspective` or `orthographic`), and camera (`lookFrom` corner/side preset or explicit `eye`/`target`, vertical lens angle `fovDeg` in 5–120°, and `orthoHeight`). Returns the view's id.",
+    signature: "view3d(ctx: ScriptContext, spec: View3dSpec): string",
+    example: layout(`${WALLS}\n    const v = documents.view3d(ctx, { name: "South-East Perspective", lookFrom: "south_east", fovDeg: 55, projection: "perspective" });\n    const sheet = documents.sheet(ctx, { number: "A-501", name: "3D Views" });\n    documents.place(ctx, sheet, v, { x: units.mm(420), y: units.mm(300) });`),
+    topics: ["view", "3d view", "camera", "perspective", "orthographic", "field of view", "fov", "isometric", "3d crop box"],
+  },
+  {
+    name: "documents.setCamera3d",
+    summary: "Updates a saved 3D view's camera (`fovDeg` 5–120°, `lookFrom`, `eye`/`target`, `orthoHeight`, or `projection`), preserving any unspecified fields from its current camera.",
+    signature: "setCamera3d(ctx: ScriptContext, view: string, camera: Camera3dSpec): void",
+    example: layout(`${WALLS}\n    const v = documents.view3d(ctx, { name: "Entry 3D", lookFrom: "south_west", projection: "perspective" });\n    documents.setCamera3d(ctx, v, { fovDeg: 65 });`),
+    topics: ["view", "3d view", "camera", "field of view", "fov", "lens", "perspective", "orthographic"],
   },
   {
     name: "documents.enlargedPlan",

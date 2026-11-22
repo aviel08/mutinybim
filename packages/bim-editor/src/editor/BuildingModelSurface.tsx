@@ -220,9 +220,6 @@ export type BuildingModelView = '3d' | 'plan' | 'sheet'
 
 export type { BuildingModelTool } from './building-model-ribbon'
 
-/** Space the properties panel takes on the right of the canvas (w-80), so overlays clear it. */
-const PROPERTIES_PANEL_PX = 320
-
 /** Keys typed into a field are the field's, not the view's. */
 function typingInField(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
@@ -784,12 +781,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else await viewer.framePlanRect(view.cropMin, view.cropMax)
       }
     }
-    cameraPlacing.current.start(cameraKey)
+    const placementToken = cameraPlacing.current.start()
     void run().catch((err: unknown) => {
       console.error('[BuildingModelSurface] opening the view in the canvas failed', { cameraKey, err })
       toast.error("The view couldn't be shown in the canvas. Its printed drawing is still available.")
     }).finally(() => {
-      cameraPlacing.current.finish(cameraKey)
+      cameraPlacing.current.finish(placementToken)
     })
     return () => {
       cancelled = true
@@ -2058,7 +2055,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
-        if (ids.length > 0 && isNudgeKey(e.key)) {
+        if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
           e.preventDefault()
           setToolHint(session.nudgeSelection(ids, e.key, e.shiftKey))
           return
@@ -3534,7 +3531,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             <OrientationControls
               trueNorthDeg={site.trueNorthDeg}
               viewer={viewer}
-              rightInset={openView || selection ? PROPERTIES_PANEL_PX : 0}
+              rightInset={propertiesOpen ? propertiesWidth : 0}
               canCreateViews={canEdit}
               blockedReason={blockedReason}
               onCreatePlan={() => setRequest({ kind: 'new_view', viewType: 'floor_plan' })}
@@ -3728,7 +3725,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             </div>
           )}
           {status === 'read_only' && !phase && !showDrawing && (
-            <div className="absolute bottom-3 left-3 max-w-sm">
+            <div className="absolute bottom-14 left-3 max-w-sm">
               <Alert>
                 <Wind />
                 <AlertTitle>View only</AlertTitle>
@@ -3749,25 +3746,6 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             <ToolHintBar text={toolHint} tone={toolHint === refusal ? 'warning' : 'info'} style={propertiesOpen ? { right: propertiesWidth + 24 } : undefined} />
           )}
           {showDrawing && <TrackpadHint />}
-          {!scheduleGridOpen && (
-            <SelectionLocksBar
-              viewer={viewer}
-              is3d={!showDrawing && !planOpen}
-              hasSelection={selectedIds.length > 0}
-              selectionLocked={selectedIds.length > 0 && selectedIds.every((id) => lockOf(model?.elements[id]) !== null)}
-              canEdit={canEdit}
-              onTogglePin={() => {
-                if (!model || selectedIds.length === 0) return
-                const allLocked = selectedIds.every((id) => lockOf(model.elements[id]) !== null)
-                submitWithUndo(
-                  allLocked
-                    ? { type: 'unlock_elements', elementIds: [...selectedIds] }
-                    : { type: 'lock_elements', elementIds: [...selectedIds], state: 'existing', reason: 'Pinned by user' },
-                  allLocked ? 'Unpin selection' : 'Pin selection',
-                )
-              }}
-            />
-          )}
           {viewer && !showDrawing && !scheduleGridOpen && <OrbitPointMarker viewer={viewer} enabled={!planOpen} />}
           {viewer && !showDrawing && !scheduleGridOpen && <ZoomThroughNotice viewer={viewer} />}
           {backSheet && !showDrawing && !drawingSection && (
@@ -3981,9 +3959,30 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           )}
         </div>
       </div>
-      <ModelFromStore store={modelStore} zones={ORGANIZATION_ZONES}>
-        {(shown) => <OrganizationStatusBar model={shown} canEdit={canEdit} blockedReason={blockedReason} submit={submitWithUndo} onRefused={(message) => toast.error(message)} />}
-      </ModelFromStore>
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-t bg-background px-3 text-xs">
+        <ModelFromStore store={modelStore} zones={ORGANIZATION_ZONES}>
+          {(shown) => <OrganizationStatusBar model={shown} canEdit={canEdit} blockedReason={blockedReason} submit={submitWithUndo} onRefused={(message) => toast.error(message)} />}
+        </ModelFromStore>
+        {!scheduleGridOpen && (
+          <SelectionLocksBar
+            viewer={viewer}
+            is3d={!showDrawing && !planOpen}
+            hasSelection={selectedIds.length > 0}
+            selectionLocked={selectedIds.length > 0 && selectedIds.every((id) => lockOf(model?.elements[id]) !== null)}
+            canEdit={canEdit}
+            onTogglePin={() => {
+              if (!model || selectedIds.length === 0) return
+              const allLocked = selectedIds.every((id) => lockOf(model.elements[id]) !== null)
+              submitWithUndo(
+                allLocked
+                  ? { type: 'unlock_elements', elementIds: [...selectedIds] }
+                  : { type: 'lock_elements', elementIds: [...selectedIds], state: 'existing', reason: 'Pinned by user' },
+                allLocked ? 'Unpin selection' : 'Pin selection',
+              )
+            }}
+          />
+        )}
+      </div>
       {organizationDialog !== null && (
         <ModelFromStore store={modelStore}>
           {(shown) =>

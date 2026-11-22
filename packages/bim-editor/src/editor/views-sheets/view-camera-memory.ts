@@ -20,25 +20,28 @@ export function sameCamera(a: View3dCamera | undefined, b: View3dCamera): boolea
 }
 
 /**
- * Whether a camera placement is in flight, and for which canvas key. Opening a
- * view moves the camera in steps (the mode conversion, isolating the level, the
- * saved camera), and every step settles: a settle that lands while the
- * placement is still running says where the camera was before the view opened
- * (the previous view's position), not where this person is — remembering it
- * would make the view open at the previous view's camera from then on. A newer
- * placement may start while an older one is still running (a quick click from
- * one view to the next), so only a placement that is still the current one
- * clears the flag.
+ * Whether a camera placement is in flight. Opening a view moves the camera in
+ * steps (the mode conversion, isolating the level, the saved camera), and every
+ * step settles: a settle that lands while the placement is still running says
+ * where the camera was before the view opened (the previous view's position),
+ * not where this person is — remembering it would make the view open at the
+ * previous view's camera from then on. A newer placement may start while an
+ * older one is still running (a quick click from one view to the next, or an
+ * effect re-run for the same view when camera memory finishes loading), so each
+ * start returns a unique token and only the latest placement can clear the flag.
  */
 export class CameraPlacement {
-  private current: string | null = null
+  private next = 0
+  private current: number | null = null
 
-  start(key: string): void {
-    this.current = key
+  start(): number {
+    const token = ++this.next
+    this.current = token
+    return token
   }
 
-  finish(key: string): void {
-    if (this.current === key) this.current = null
+  finish(token: number): void {
+    if (this.current === token) this.current = null
   }
 
   get inFlight(): boolean {
