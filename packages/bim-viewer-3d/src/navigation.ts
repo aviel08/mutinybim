@@ -13,6 +13,8 @@ const ORTHO_MIN_DEPTH = 1;
 /** Two middle-button presses within this long, and this close, are a double-click (zoom extents), ms / px. */
 export const MIDDLE_DOUBLE_CLICK_MS = 400;
 export const MIDDLE_DOUBLE_CLICK_PX = 6;
+/** A mouse or touch drag turning the view. */
+const TURNING = CameraControls.ACTION.ROTATE | CameraControls.ACTION.TOUCH_ROTATE;
 
 /**
  * Distance scale for one wheel event: below 1 zooms in, above 1 zooms out.
@@ -60,6 +62,9 @@ interface OrbitFrame {
  *
  * Within `zoomFloor` of the point, zooming in carries on forward along the
  * pointer's ray instead of slowing to a crawl.
+ *
+ * While walking (`walking`), a drag turns the view where the eye stands
+ * instead of swinging it round the orbit point; see `walkBy`.
  */
 export class PointZoomControls extends CameraControls {
   /** Metres: closer than this, zooming in moves forward along the pointer's ray instead of approaching the point. */
@@ -79,6 +84,14 @@ export class PointZoomControls extends CameraControls {
   private readonly wheelElement: HTMLElement;
   private freeButtons: FreeButtons | null = null;
   private pendingPivot: THREE.Vector3 | null = null;
+  private walkingMode = false;
+  /** True while a turn by the person is settling: a drag (and its easing once the buttons come up), the orientation ball, a preset view. */
+  private turning = false;
+  /** Where the last update left the eye and the orbit point, while walking. */
+  private readonly frameEye = new THREE.Vector3();
+  private readonly frameTarget = new THREE.Vector3();
+  private readonly drift = new THREE.Vector3();
+  private frameHeld = false;
   private readonly pointerRay = new THREE.Raycaster();
 
   constructor(camera: ViewCamera, element: HTMLElement) {
@@ -131,6 +144,57 @@ export class PointZoomControls extends CameraControls {
   /** A chord is held: the left button pans until the buttons come up. */
   get chordPanning(): boolean {
     return this.chordLeft !== null;
+  }
+
+  /**
+   * Walking (`ModelViewer3D.setWalk`). A drag, the orientation ball or a
+   * preset view then turns the camera where the eye stands, instead of
+   * swinging it round the orbit point: the eye moves only when the person
+   * walks (`walkBy`), pans or zooms. The orbit point keeps its distance ahead
+   * of the eye, so the orbit is as it was once the walk ends.
+   */
+  get walking(): boolean {
+    return this.walkingMode;
+  }
+
+  set walking(walking: boolean) {
+    if (walking === this.walkingMode) return;
+    this.walkingMode = walking;
+    this.turning = false;
+    this.frameHeld = false;
+  }
+
+  /**
+   * Carry the eye and the orbit point together by `by` (scene metres), from
+   * the next update: a walk step. Nothing eases here; the step already has.
+   */
+  walkBy(by: THREE.Vector3): void {
+    if (by.lengthSq() === 0) return;
+    this._target.add(by);
+    this._targetEnd.add(by);
+    this._needsUpdate = true;
+  }
+
+  // The orientation ball and the preset views turn the camera (`ModelViewer3D.orbitBy`, `orientTo`): the eye stays.
+  override rotate(azimuthAngle: number, polarAngle: number, enableTransition?: boolean): Promise<void> {
+    this.turning = true;
+    return super.rotate(azimuthAngle, polarAngle, enableTransition);
+  }
+
+  override rotateTo(azimuthAngle: number, polarAngle: number, enableTransition?: boolean): Promise<void> {
+    this.turning = true;
+    return super.rotateTo(azimuthAngle, polarAngle, enableTransition);
+  }
+
+  // The eye is told where to go (Home, a saved view), or only the orbit point moves: neither is a turn.
+  override setLookAt(positionX: number, positionY: number, positionZ: number, targetX: number, targetY: number, targetZ: number, enableTransition?: boolean): Promise<void> {
+    this.turning = false;
+    return super.setLookAt(positionX, positionY, positionZ, targetX, targetY, targetZ, enableTransition);
+  }
+
+  override setOrbitPoint(targetX: number, targetY: number, targetZ: number): void {
+    this.turning = false;
+    super.setOrbitPoint(targetX, targetY, targetZ);
   }
 
   private readonly onMiddleDown = (event: PointerEvent) => {
@@ -420,9 +484,35 @@ export class PointZoomControls extends CameraControls {
   }
 
   override update(delta: number): boolean {
+    if (!this.walking) {
+      const changed = super.update(delta);
+      this.applyPendingPivot();
+      return changed;
+    }
+    const { theta, phi } = this._spherical;
+    if (this.currentAction & TURNING) this.turning = true;
     const changed = super.update(delta);
+    if (this.frameHeld && this.turning && (this._spherical.theta !== theta || this._spherical.phi !== phi)) this.holdTheEye();
+    this.frameEye.copy(this._camera.position);
+    this.frameTarget.copy(this._target);
+    this.frameHeld = true;
+    if (this._spherical.theta === this._sphericalEnd.theta && this._spherical.phi === this._sphericalEnd.phi) this.turning = false;
     this.applyPendingPivot();
     return changed;
+  }
+
+  /**
+   * The view turned since the last update. The eye goes back to where that
+   * update left it, moved only as far as the orbit point did in the meantime
+   * (a walk step, a pan): what the turn moved the eye is taken out of the eye
+   * and put into the orbit point, which stays as far ahead as it was.
+   */
+  private holdTheEye(): void {
+    this.drift.copy(this._camera.position).sub(this.frameEye).sub(this._target.clone().sub(this.frameTarget));
+    if (this.drift.lengthSq() === 0) return;
+    this._target.sub(this.drift);
+    this._targetEnd.sub(this.drift);
+    this._camera.position.sub(this.drift);
   }
 
   private applyPendingPivot() {

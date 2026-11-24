@@ -39,6 +39,8 @@ import {
 import { ViewerPalette, type ViewerColors } from "./viewer-colors";
 import { matchCamera, orthoZoomFor, type Projection, type ViewCamera } from "./projection";
 import { makeCameraControls, pinOrbitPoint, zoomFloorFor, type PointZoomControls, type ZoomAnchorQuery } from "./navigation";
+import { releaseWalkOnBlur, WalkMotion } from "./walk";
+import { walkKeyOf } from "./walk-keys";
 import { NORMAL_REFERENCE_TONE, PICK_HIGHLIGHT_ID, baseMaterials, overlayMaterial, referenceMayWinPick, sameReferenceTone, toneMaterial, type ReferenceTone } from "./reference-tone";
 import { NO_INSETS, planFit, type FrameInsets } from "./plan-fit";
 import { CropBoxOutline, cropBoxScenePlanes, faceDragOffsetMm, gripsOnScreen, keptByPlanes, type GripOnScreen } from "./crop-box";
@@ -47,6 +49,11 @@ import { solidRotation } from "./solid-pose";
 import { nativeHiddenByLinked } from "./hover-occlusion";
 
 export type ViewMode = "3d" | "plan";
+
+/** A frame longer than this (seconds) counts as one this long for a walk step. */
+const WALK_MAX_FRAME_SECONDS = 0.1;
+/** A walk moves on the ground plane: the world's up. */
+const WALK_UP = new THREE.Vector3(0, 1, 0);
 
 /** A material Fragments makes reaches a mesh within a few frames of being made. */
 const REFERENCE_MATERIAL_WATCH_FRAMES = 30;
@@ -282,6 +289,15 @@ export class ModelViewer3D {
   /** Where the 3D view was looking when plan took over (a projection switch in plan frames about it). */
   private readonly last3dTarget = new THREE.Vector3();
   private controls: PointZoomControls;
+  /** Walking (`setWalk`): whether the mode holds, the keys held for it and the speed they have eased to. */
+  private walkOn = false;
+  private readonly walk = new WalkMotion();
+  /** A key held when the window loses focus never comes up: nothing keeps walking. */
+  private readonly stopWalkOnBlur = releaseWalkOnBlur(this.walk, window);
+  private readonly walkListeners = new Set<(walking: boolean) => void>();
+  private readonly walkStep = new THREE.Vector3();
+  private readonly walkForward = new THREE.Vector3();
+  private readonly walkRight = new THREE.Vector3();
   /** A completed click or a wheel zoom chose the orbit point (the controls' target); false: it follows the middle of the model. */
   private orbitPointPinned = false;
   private zoomFloor = 1;
@@ -557,6 +573,8 @@ export class ModelViewer3D {
 
   private makeControls(camera: THREE.PerspectiveCamera | THREE.OrthographicCamera): PointZoomControls {
     const controls = makeCameraControls(camera, this.renderer.domElement);
+    // Plan, 3D and projection changes make fresh controls; a walk holds across them.
+    controls.walking = this.walkOn;
     controls.zoomFloor = this.zoomFloor;
     controls.zoomAnchor = this.zoomAnchorAt;
     controls.onPassThrough = () => this.emitPassThrough(true);
@@ -634,6 +652,7 @@ export class ModelViewer3D {
   private tick() {
     if (this.disposed || this.paused || this.contextLost) return;
     const delta = this.clock.getDelta();
+    this.stepWalk(delta);
     this.controls.update(delta);
     this.renderer.info.reset();
     const hPx = this.size().height;
@@ -1390,6 +1409,11 @@ export class ModelViewer3D {
    */
   setMode(mode: ViewMode, cutElevationMm?: number) {
     if (mode === this.mode) return;
+    // Nothing to walk in plan: the walk ends there, at once (no easing carries into the plan camera).
+    if (mode === "plan") {
+      this.setWalk(false);
+      this.walk.stop();
+    }
     const target = new THREE.Vector3();
     this.controls.getTarget(target);
     const enabled = this.controls.enabled;
@@ -1844,6 +1868,62 @@ export class ModelViewer3D {
   onCameraSettled(listener: () => void): () => void {
     this.cameraSettledListeners.add(listener);
     return () => this.cameraSettledListeners.delete(listener);
+  }
+
+  /**
+   * Walk the model with the keyboard: W A S D move the eye on the ground
+   * plane, the way the view faces; E and Q raise and lower it. While walking,
+   * a drag turns the view where the eye stands. It is a mode the host turns on
+   * and off (its Walk button, a key) and reports the keys for (`walkKey`):
+   * the letters are the host's own shortcuts the rest of the time. There is
+   * nothing to walk in plan, where it stays off.
+   */
+  setWalk(on: boolean): void {
+    const next = on && this.mode === "3d";
+    if (next === this.walkOn) return;
+    this.walkOn = next;
+    this.controls.walking = next;
+    if (!next) this.walk.releaseAll();
+    for (const listener of this.walkListeners) listener(next);
+  }
+
+  walking(): boolean {
+    return this.walkOn;
+  }
+
+  /**
+   * A key went down or came up (`code` is `KeyboardEvent.code`). True for one
+   * of the walk keys, which the host then keeps from its own shortcuts. Only
+   * held while the walk is on, so the host turns the walk on first.
+   */
+  walkKey(code: string, down: boolean): boolean {
+    const key = walkKeyOf(code);
+    if (!key) return false;
+    if (!this.walkOn) return true;
+    if (down) this.walk.hold(key);
+    else this.walk.release(key);
+    return true;
+  }
+
+  /** Hear when a walk starts or stops. Returns an unsubscribe. */
+  onWalkChange(listener: (walking: boolean) => void): () => void {
+    this.walkListeners.add(listener);
+    return () => this.walkListeners.delete(listener);
+  }
+
+  /** One frame of a walk, before the controls update: how far the held keys carry the eye and the orbit point together. */
+  private stepWalk(delta: number) {
+    // Navigation is off (an overlay is dragging a grip): the eye holds, keys held or not.
+    if (!this.controls.enabled) return;
+    // No walk on and no speed left to ease out.
+    if (!this.walkOn && this.walk.resting) return;
+    // A long frame (the tab was away, a stall) is one short step, not a leap.
+    const step = Math.min(delta, WALK_MAX_FRAME_SECONDS);
+    // The camera never rolls (its up is the world's up), so its screen-right lies on the ground plane, and facing is screen-up on that plane.
+    this.walkRight.set(1, 0, 0).applyQuaternion(this.camera().quaternion).setY(0).normalize();
+    this.walkForward.crossVectors(WALK_UP, this.walkRight);
+    const by = this.walk.step(step, this.walkForward, this.walkRight, this.controls.distance, this.walkStep);
+    this.controls.walkBy(by);
   }
 
   /** Clip to a view's plan crop box (kernel mm), at every height. Null removes it. */
@@ -2738,6 +2818,8 @@ export class ModelViewer3D {
       this.planFootprintsIdle = null;
     }
     this.disposed = true;
+    this.stopWalkOnBlur();
+    this.walkListeners.clear();
     this.surfacePicker.dispose();
     this.renderer.setAnimationLoop(null);
     this.resizeObserver.disconnect();

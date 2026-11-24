@@ -164,6 +164,7 @@ import { buildingModelQuickCommands, buildingModelRibbon, PROJECTION_SHORTCUT, t
 import { OrientationControls } from './orientation/OrientationControls'
 import { OrbitPointMarker } from './orientation/OrbitPointMarker'
 import { OrbitPointClicks } from './orbit-point'
+import { walkKeyAction, WALKING_HINT } from './walk-keys'
 import { PlusHandles, plusHandlesViewFor, type FaceHandle } from './PlusHandles'
 import { useCopyChord } from './copy-chord'
 import { PROPERTIES_DEFAULT_WIDTH_PX, PROPERTIES_SURFACE, ResizableSideRail } from './layout/ResizableSideRail'
@@ -838,6 +839,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       if (camera) rememberCamera(cameraRememberKey, camera)
     })
   }, [viewer, cameraRememberKey, cameraMemory.loaded, rememberCamera])
+
+  // A walk shows its keys while it holds, however it started (the toolbar's Walk button or W); they leave with it.
+  useEffect(() => {
+    if (!viewer) return
+    return viewer.onWalkChange((walking) => setToolHint((hint) => (walking ? WALKING_HINT : hint === WALKING_HINT ? null : hint)))
+  }, [viewer])
 
   // An open plan or 3D view shows the live model in the visual style it sets; otherwise shaded with edges, as before.
   const liveStyle = openView && !showDrawing ? openView.props?.visualStyle ?? 'shaded_edges' : 'shaded_edges'
@@ -2081,6 +2088,24 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else requestDelete(toDelete.id)
         return
       }
+      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
+      if (showDrawing) return
+      // Walking the 3D view with W A S D, E and Q (`walk-keys.ts`): the camera has those keys, and Esc leaves the walk before anything else.
+      const walker = session?.viewer
+      if (walker) {
+        const walk = walkKeyAction(e, walker.walking())
+        if (walk === 'start' || walk === 'move') {
+          e.preventDefault()
+          if (walk === 'start') walker.setWalk(true)
+          walker.walkKey(e.code, true)
+          return
+        }
+        if (walk === 'stop') {
+          e.preventDefault()
+          walker.setWalk(false)
+          return
+        }
+      }
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
         if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
@@ -2216,6 +2241,9 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       else void session?.clearSelection()
     }
     const onKeyUp = (e: KeyboardEvent) => {
+      // A walk key came up wherever the focus is by then (a field too): the camera must not keep walking.
+      const walker = sessionRef.current?.viewer
+      if (walker?.walking()) walker.walkKey(e.code, false)
       if (e.key === 'Shift') sessionRef.current?.setShiftHeld(false)
       const before = altLockRef.current
       if (e.key === 'Alt' && before !== null) {

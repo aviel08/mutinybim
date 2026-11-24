@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, Home, LayoutTemplate, Scan } from 'lucide-react'
+import { ChevronDown, Footprints, Home, LayoutTemplate, Scan } from 'lucide-react'
 import type { ModelViewer3D } from '@permitzip/bim-viewer-3d'
 import {
   isElevationSide,
@@ -47,7 +47,7 @@ const RAD_TO_DEG = 180 / Math.PI
 const SLIDER_ADJUST_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'])
 
 interface Props {
-  readonly viewer: Pick<ModelViewer3D, 'orientation' | 'onCameraChange' | 'orientTo' | 'orbitBy' | 'frame' | 'camera3dState' | 'setFovDeg'>
+  readonly viewer: Pick<ModelViewer3D, 'orientation' | 'onCameraChange' | 'orientTo' | 'orbitBy' | 'frame' | 'camera3dState' | 'setFovDeg' | 'walking' | 'setWalk' | 'onWalkChange'>
   /** Space to leave on the right (the properties panel), px. */
   readonly rightInset: number
   readonly canCreateViews: boolean
@@ -65,9 +65,10 @@ export const otherProjection = (p: Projection): Projection => (p === 'orthograph
 
 /**
  * Orientation controls for the 3D view, top right: the orientation ball, then a
- * flat toolbar with Home, the projection switch, a compass dial whose N is
- * true north, and a menu that lists every preset view. When the camera sits
- * square on the top or a side, it offers to save that as a plan or elevation.
+ * flat toolbar with Home, the Walk switch, the projection switch, a compass
+ * dial whose N is true north, and a menu that lists every preset view. When the
+ * camera sits square on the top or a side, it offers to save that as a plan or
+ * elevation.
  */
 export function OrientationControls({ viewer, rightInset, canCreateViews, blockedReason, onCreatePlan, onCreateElevation, trueNorthDeg, projection, onProjectionChange }: Props) {
   const dialRef = useRef<HTMLSpanElement | null>(null)
@@ -75,6 +76,10 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
   const [available, setAvailable] = useState(true)
   /** Lens angle the menu shows; re-read whenever the menu opens, so a saved view's camera shows through. */
   const [fovDeg, setFovDeg] = useState(() => viewer.camera3dState()?.fovDeg ?? 45)
+  /** Whether the walk holds: pressed while W A S D walk the camera (it also starts from the keyboard, so the viewer is the one to ask). */
+  const [walking, setWalking] = useState(() => viewer.walking())
+
+  useEffect(() => viewer.onWalkChange(setWalking), [viewer])
 
   const follow = useCallback(() => {
     const o = viewer.orientation()
@@ -122,6 +127,7 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
       data-testid="orientation-controls"
       data-square-on={squareOn ?? ''}
       data-projection={projection}
+      data-walking={walking ? 'true' : 'false'}
     >
       <OrientationBall viewer={viewer} />
       <div className="flex items-center gap-1 rounded-md border bg-background/95 p-0.5 shadow-sm" role="toolbar" aria-label="View orientation">
@@ -132,6 +138,25 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
             </Button>
           </TooltipTrigger>
           <TooltipContent>Home: everything in view from the south-east (F)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={walking ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              aria-label="Walk the model"
+              aria-pressed={walking}
+              data-testid="orientation-walk"
+              onClick={(e) => {
+                viewer.setWalk(!walking)
+                // The keyboard belongs to the walk now: Space must not press this button again.
+                e.currentTarget.blur()
+              }}
+            >
+              <Footprints />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{walking ? 'Walking: drag to look around. Esc stops.' : 'Walk: W A S D move, E and Q go up and down, drag to look around (W)'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
