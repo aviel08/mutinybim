@@ -144,6 +144,26 @@ describe('the Walk switch on the view toolbar', () => {
     )
     expect(walkButton()).toHaveAttribute('aria-pressed', 'true')
   })
+
+  it('is disabled in orthographic projection', () => {
+    const viewer = viewerWith()
+    render(
+      <TooltipProvider>
+        <OrientationControls
+          viewer={viewer as unknown as Parameters<typeof OrientationControls>[0]['viewer']}
+          rightInset={0}
+          canCreateViews
+          blockedReason=""
+          onCreatePlan={() => {}}
+          onCreateElevation={() => {}}
+          trueNorthDeg={0}
+          projection="orthographic"
+          onProjectionChange={() => {}}
+        />
+      </TooltipProvider>,
+    )
+    expect(walkButton()).toBeDisabled()
+  })
 })
 
 describe('the walk speed slider under the Walk button', () => {
@@ -170,17 +190,25 @@ describe('the walk speed slider under the Walk button', () => {
     expect(screen.queryByTestId('orientation-walk-speed')).toBeNull()
   })
 
-  it('the arrow keys step the pace and tell the viewer (each step about 12%)', () => {
+  it('the arrow keys step the pace and tell the viewer (each step about 12%) without bubbling to window shortcuts', () => {
     const viewer = renderControls()
     act(() => viewer.setWalk(true))
-    speedThumb().focus()
-    fireEvent.keyDown(speedThumb(), { key: 'ArrowRight' })
-    expect(viewer.setWalkSpeed).toHaveBeenLastCalledWith(Math.pow(10, 0.05))
-    // The stub tells its listeners, so the readout followed.
-    expect(speedPanel()).toHaveTextContent('112%')
-    fireEvent.keyDown(speedThumb(), { key: 'ArrowLeft' })
-    expect(viewer.setWalkSpeed).toHaveBeenLastCalledWith(1)
-    expect(speedPanel()).toHaveTextContent('100%')
+    const windowKeys: string[] = []
+    const onWindowKey = (e: KeyboardEvent) => windowKeys.push(e.key)
+    window.addEventListener('keydown', onWindowKey)
+    try {
+      speedThumb().focus()
+      fireEvent.keyDown(speedThumb(), { key: 'ArrowRight' })
+      expect(viewer.setWalkSpeed).toHaveBeenLastCalledWith(Math.pow(10, 0.05))
+      // The stub tells its listeners, so the readout followed.
+      expect(speedPanel()).toHaveTextContent('112%')
+      fireEvent.keyDown(speedThumb(), { key: 'ArrowLeft' })
+      expect(viewer.setWalkSpeed).toHaveBeenLastCalledWith(1)
+      expect(speedPanel()).toHaveTextContent('100%')
+      expect(windowKeys).toEqual([])
+    } finally {
+      window.removeEventListener('keydown', onWindowKey)
+    }
   })
 
   it('follows the wheel turning the pace elsewhere (right-button + scroll on the canvas)', () => {

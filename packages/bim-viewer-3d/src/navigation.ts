@@ -89,11 +89,17 @@ export class PointZoomControls extends CameraControls {
   private walkingMode = false;
   /** True while a turn by the person is settling: a drag (and its easing once the buttons come up), the orientation ball, a preset view. */
   private turning = false;
-  /** Where the last update left the eye and the orbit point, while walking. */
-  private readonly frameEye = new THREE.Vector3();
-  private readonly frameTarget = new THREE.Vector3();
+  /** Scratch vectors/matrices for zero-allocation turn-in-place compensation while walking. */
+  private readonly prevEyeScratch = new THREE.Vector3();
+  private readonly scratchSpherical = new THREE.Spherical();
+  private readonly scratchBasis = new THREE.Matrix4();
+  private readonly scratchAxisX = new THREE.Vector3();
+  private readonly scratchAxisY = new THREE.Vector3();
+  private readonly scratchAxisZ = new THREE.Vector3();
   private readonly drift = new THREE.Vector3();
   private frameHeld = false;
+  private deferringEvents = false;
+  private readonly deferredEvents: Array<Parameters<CameraControls["dispatchEvent"]>[0]> = [];
   private readonly pointerRay = new THREE.Raycaster();
 
   constructor(camera: ViewCamera, element: HTMLElement) {
@@ -490,6 +496,14 @@ export class PointZoomControls extends CameraControls {
     return this.pendingPivot !== null;
   }
 
+  override dispatchEvent(event: Parameters<CameraControls["dispatchEvent"]>[0]): void {
+    if (this.deferringEvents) {
+      this.deferredEvents.push(event);
+      return;
+    }
+    super.dispatchEvent(event);
+  }
+
   override update(delta: number): boolean {
     if (!this.walking) {
       const changed = super.update(delta);
@@ -498,28 +512,51 @@ export class PointZoomControls extends CameraControls {
     }
     const { theta, phi } = this._spherical;
     if (this.currentAction & TURNING) this.turning = true;
-    const changed = super.update(delta);
-    if (this.frameHeld && this.turning && (this._spherical.theta !== theta || this._spherical.phi !== phi)) this.holdTheEye();
-    this.frameEye.copy(this._camera.position);
-    this.frameTarget.copy(this._target);
-    this.frameHeld = true;
-    if (this._spherical.theta === this._sphericalEnd.theta && this._spherical.phi === this._sphericalEnd.phi) this.turning = false;
+    this.deferringEvents = true;
+    this.deferredEvents.length = 0;
+    let changed: boolean;
+    try {
+      changed = super.update(delta);
+      if (this.frameHeld && this.turning && (this._spherical.theta !== theta || this._spherical.phi !== phi)) {
+        this.holdTheEye(theta, phi);
+      }
+      this.frameHeld = true;
+      if (this._spherical.theta === this._sphericalEnd.theta && this._spherical.phi === this._sphericalEnd.phi) this.turning = false;
+    } finally {
+      this.deferringEvents = false;
+    }
+    if (this.deferredEvents.length > 0) {
+      const events = this.deferredEvents.splice(0);
+      for (const event of events) super.dispatchEvent(event);
+    }
     this.applyPendingPivot();
     return changed;
   }
 
   /**
-   * The view turned since the last update. The eye goes back to where that
-   * update left it, moved only as far as the orbit point did in the meantime
-   * (a walk step, a pan): what the turn moved the eye is taken out of the eye
-   * and put into the orbit point, which stays as far ahead as it was.
+   * The view turned since the last update. Cancel only the eye movement caused
+   * by the angular change `(prevTheta, prevPhi) -> (_spherical.theta, _spherical.phi)`
+   * so walk steps, pans and radial wheel zooms keep their exact eye motion, while
+   * the rotation drift moves into the orbit point and keeps it ahead of the eye.
    */
-  private holdTheEye(): void {
-    this.drift.copy(this._camera.position).sub(this.frameEye).sub(this._target.clone().sub(this.frameTarget));
+  private holdTheEye(prevTheta: number, prevPhi: number): void {
+    this.scratchSpherical.set(this._spherical.radius, prevPhi, prevTheta);
+    this.scratchSpherical.makeSafe();
+    this.prevEyeScratch.setFromSpherical(this.scratchSpherical).applyQuaternion(this._yAxisUpSpaceInverse).add(this._target);
+    const f = this._focalOffset;
+    if (f.x !== 0 || f.y !== 0 || f.z !== 0) {
+      this.scratchBasis.lookAt(this.prevEyeScratch, this._target, this._camera.up);
+      this.scratchAxisX.setFromMatrixColumn(this.scratchBasis, 0);
+      this.scratchAxisY.setFromMatrixColumn(this.scratchBasis, 1);
+      this.scratchAxisZ.setFromMatrixColumn(this.scratchBasis, 2);
+      this.prevEyeScratch.addScaledVector(this.scratchAxisX, f.x).addScaledVector(this.scratchAxisY, -f.y).addScaledVector(this.scratchAxisZ, f.z);
+    }
+    this.drift.copy(this._camera.position).sub(this.prevEyeScratch);
     if (this.drift.lengthSq() === 0) return;
     this._target.sub(this.drift);
     this._targetEnd.sub(this.drift);
     this._camera.position.sub(this.drift);
+    this._camera.updateMatrixWorld();
   }
 
   private applyPendingPivot() {

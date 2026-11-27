@@ -19,6 +19,7 @@ const WALK_REST_SPEED = 0.01;
  * or across a room.
  */
 export function walkSpeedFor(radius: number): number {
+  if (!Number.isFinite(radius) || radius <= 0) return WALK_SLOWEST;
   return THREE.MathUtils.clamp(radius / WALK_SECONDS_TO_ORBIT_POINT, WALK_SLOWEST, WALK_FASTEST);
 }
 

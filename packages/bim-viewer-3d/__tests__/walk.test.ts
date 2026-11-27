@@ -428,23 +428,36 @@ interface Walker {
   setWalkSpeed(scale: number): void;
   walkSpeed(): number;
   onWalkSpeedChange(listener: (scale: number) => void): () => void;
+  claimCameraMode(id: string, onStop: () => void): () => void;
+  cameraMode(): string | null;
+  releaseCameraMode(): void;
+  onCameraModeChange(listener: (mode: string | null) => void): () => void;
+  setPaused(paused: boolean): void;
   releaseWalkKeys(): void;
   stepWalk(delta: number): void;
 }
 
-function viewer(opts: { mode?: "3d" | "plan" } = {}): { viewer: Walker; camera: THREE.PerspectiveCamera; controls: PointZoomControls } {
+function viewer(opts: { mode?: "3d" | "plan"; projection?: "perspective" | "orthographic" } = {}): { viewer: Walker; camera: THREE.PerspectiveCamera; controls: PointZoomControls } {
   const { camera, controls } = rig();
   // The constructor's own fields, for the real methods to run on.
   const shell: Record<string, unknown> = Object.create(ModelViewer3D.prototype);
   Object.assign(shell, {
     mode: opts.mode ?? "3d",
-    projection: "perspective",
+    projection: opts.projection ?? "perspective",
+    paused: false,
+    disposed: false,
+    contextLost: false,
     perspective: camera,
     controls,
+    clock: new THREE.Clock(),
+    renderer: { setAnimationLoop: () => {} },
     walkOn: false,
     walk: new WalkMotion(),
     walkListeners: new Set<(walking: boolean) => void>(),
     walkSpeedListeners: new Set<(scale: number) => void>(),
+    activeCameraMode: null,
+    cameraModeListeners: new Set<(mode: string | null) => void>(),
+    releaseWalkMode: null,
     walkStep: new THREE.Vector3(),
     walkForward: new THREE.Vector3(),
     walkRight: new THREE.Vector3(),
@@ -613,5 +626,106 @@ describe("ModelViewer3D walking", () => {
     frames(w, controls, 1);
     // 300 m away: 150 m/s.
     expect(camera.position.distanceTo(eye)).toBeGreaterThan(120);
+  });
+
+  it("ignores non-finite walk speeds and radii instead of poisoning camera state with NaN", () => {
+    expect(walkSpeedFor(Number.NaN)).toBe(1.5);
+    expect(walkSpeedFor(Number.POSITIVE_INFINITY)).toBe(1.5);
+    expect(walkSpeedFor(-10)).toBe(1.5);
+    const { viewer: w } = viewer();
+    const heard: number[] = [];
+    w.onWalkSpeedChange((scale) => heard.push(scale));
+    w.setWalkSpeed(2);
+    w.setWalkSpeed(Number.NaN);
+    w.setWalkSpeed(Number.POSITIVE_INFINITY);
+    expect(w.walkSpeed()).toBe(2);
+    expect(heard).toEqual([2]);
+  });
+
+  it("stays off in orthographic 3D projection", () => {
+    const { viewer: w, camera, controls } = viewer({ projection: "orthographic" });
+    const heard: boolean[] = [];
+    w.onWalkChange((on) => heard.push(on));
+    w.setWalk(true);
+    w.walkKey("KeyW", true);
+    frames(w, controls, 1);
+    expect(w.walking()).toBe(false);
+    expect(heard).toEqual([]);
+    expect(camera.position.distanceTo(EYE)).toBe(0);
+  });
+
+  it("simultaneous turn and wheel zoom while walking keeps the zoom instead of cancelling it", () => {
+    const { camera, controls } = rig();
+    const initDist = camera.position.distanceTo(target(controls));
+    controls.walking = true;
+    controls.update(0);
+    const beforeAim = aim(camera);
+    void controls.rotate(DEG(40), 0, true);
+    void controls.dollyTo(initDist * 0.5, true);
+    settle(controls);
+    expect(aim(camera).angleTo(beforeAim)).toBeGreaterThan(DEG(30));
+    expect(camera.position.distanceTo(EYE)).toBeGreaterThan(initDist * 0.35);
+    expect(camera.position.distanceTo(target(controls))).toBeCloseTo(initDist * 0.5, 2);
+  });
+
+  it("emits update and sleep events after holdTheEye so listeners never observe pre-correction orbited eye drift", () => {
+    const { camera, controls } = rig();
+    controls.walking = true;
+    controls.update(0);
+    let maxUpdateDrift = 0;
+    let maxMatrixDrift = 0;
+    let sleepDrift = -1;
+    const worldPos = new THREE.Vector3();
+    controls.addEventListener("update", () => {
+      maxUpdateDrift = Math.max(maxUpdateDrift, camera.position.distanceTo(EYE));
+      worldPos.setFromMatrixPosition(camera.matrixWorld);
+      maxMatrixDrift = Math.max(maxMatrixDrift, worldPos.distanceTo(EYE));
+    });
+    controls.addEventListener("sleep", () => {
+      sleepDrift = camera.position.distanceTo(EYE);
+    });
+    void controls.rotate(DEG(35), DEG(-10), true);
+    settle(controls);
+    expect(maxUpdateDrift).toBeLessThan(1e-9);
+    expect(maxMatrixDrift).toBeLessThan(1e-9);
+    expect(sleepDrift).toBeGreaterThanOrEqual(0);
+    expect(sleepDrift).toBeLessThan(1e-9);
+  });
+
+  it("exclusive camera modes: another navigation mode stops walking cleanly, and starting walk stops the previous mode", () => {
+    const { viewer: w, controls } = viewer();
+    const modes: Array<string | null> = [];
+    const walks: boolean[] = [];
+    w.onCameraModeChange((m) => modes.push(m));
+    w.onWalkChange((on) => walks.push(on));
+
+    w.setWalk(true);
+    expect(w.cameraMode()).toBe("walk");
+    expect(w.walking()).toBe(true);
+
+    let otherStopped = 0;
+    const releaseOther = w.claimCameraMode("floor-walk", () => {
+      otherStopped += 1;
+    });
+    expect(w.walking()).toBe(false);
+    expect(controls.walking).toBe(false);
+    expect(w.cameraMode()).toBe("floor-walk");
+    expect(otherStopped).toBe(0);
+
+    w.setWalk(true);
+    expect(otherStopped).toBe(1);
+    expect(w.cameraMode()).toBe("walk");
+    expect(w.walking()).toBe(true);
+
+    // Calling stale release from the superseded mode is a no-op.
+    releaseOther();
+    expect(w.cameraMode()).toBe("walk");
+
+    // Pausing the viewer (switching to a drawing, sheet, or schedule) ends the active mode at once.
+    w.setPaused(true);
+    expect(w.walking()).toBe(false);
+    expect(w.cameraMode()).toBeNull();
+    expect(walks).toEqual([true, false, true, false]);
+    expect(modes).toEqual(["walk", null, "floor-walk", null, "walk", null]);
   });
 });

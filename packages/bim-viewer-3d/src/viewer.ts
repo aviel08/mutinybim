@@ -50,6 +50,17 @@ import { nativeHiddenByLinked } from "./hover-occlusion";
 
 export type ViewMode = "3d" | "plan";
 
+/**
+ * Exclusive owner of 3D camera navigation (keyboard walk, floor-walk,
+ * route-follow, waypoint flyover, or a host-provided mode). Claiming a new
+ * mode calls `stop()` on the previous owner so two navigation modes never
+ * compete for camera controls, Escape, or projection.
+ */
+export interface CameraModeClaim {
+  readonly id: string;
+  readonly stop: () => void;
+}
+
 /** A frame longer than this (seconds) counts as one this long for a walk step. */
 const WALK_MAX_FRAME_SECONDS = 0.1;
 /** A walk moves on the ground plane: the world's up. */
@@ -299,6 +310,10 @@ export class ModelViewer3D {
   private readonly walkStep = new THREE.Vector3();
   private readonly walkForward = new THREE.Vector3();
   private readonly walkRight = new THREE.Vector3();
+  /** Exclusive owner of 3D camera navigation (walk mode, floor-walk, flyover, or host mode). */
+  private activeCameraMode: CameraModeClaim | null = null;
+  private readonly cameraModeListeners = new Set<(mode: string | null) => void>();
+  private releaseWalkMode: (() => void) | null = null;
   /** A completed click or a wheel zoom chose the orbit point (the controls' target); false: it follows the middle of the model. */
   private orbitPointPinned = false;
   private zoomFloor = 1;
@@ -639,11 +654,16 @@ export class ModelViewer3D {
   setPaused(paused: boolean): void {
     if (this.paused === paused) return;
     this.paused = paused;
+    if (paused) {
+      this.releaseCameraMode();
+      this.walk.stop();
+    }
     this.syncAnimationLoop();
   }
 
   private syncAnimationLoop(): void {
     const hidden = typeof document !== "undefined" && document.hidden;
+    if (hidden) this.walk.releaseAll();
     if (this.disposed || this.paused || this.contextLost || hidden) {
       this.renderer.setAnimationLoop(null);
     } else {
@@ -1412,9 +1432,9 @@ export class ModelViewer3D {
    */
   setMode(mode: ViewMode, cutElevationMm?: number) {
     if (mode === this.mode) return;
-    // Nothing to walk in plan: the walk ends there, at once (no easing carries into the plan camera).
+    // Nothing to walk or drive in plan: any active 3D camera mode ends at once.
     if (mode === "plan") {
-      this.setWalk(false);
+      this.releaseCameraMode();
       this.walk.stop();
     }
     const target = new THREE.Vector3();
@@ -1590,6 +1610,10 @@ export class ModelViewer3D {
    */
   setProjection(projection: Projection) {
     if (projection === this.projection) return;
+    if (projection === "orthographic") {
+      this.releaseCameraMode();
+      this.walk.stop();
+    }
     const from = this.camera3d();
     this.projection = projection;
     const to = this.camera3d();
@@ -1874,20 +1898,83 @@ export class ModelViewer3D {
   }
 
   /**
+   * Claim exclusive ownership of 3D camera navigation (walk mode, floor-walk,
+   * route-follow, waypoint flyover, or a host-defined mode). Any previously
+   * active mode is stopped first via its `onStop` callback. Returns an
+   * idempotent release function.
+   */
+  claimCameraMode(id: string, onStop: () => void): () => void {
+    this.releaseCameraMode();
+    const release = () => {
+      if (this.activeCameraMode !== claim) return;
+      this.activeCameraMode = null;
+      this.notifyCameraMode(null);
+    };
+    const claim: CameraModeClaim = {
+      id,
+      stop: () => {
+        if (this.activeCameraMode !== claim) return;
+        this.activeCameraMode = null;
+        this.notifyCameraMode(null);
+        onStop();
+      },
+    };
+    this.activeCameraMode = claim;
+    this.notifyCameraMode(id);
+    return release;
+  }
+
+  /** The id of the currently active exclusive 3D camera navigation mode, or null for default orbit. */
+  cameraMode(): string | null {
+    return this.activeCameraMode?.id ?? null;
+  }
+
+  /** Stop whichever exclusive 3D camera navigation mode is currently active, if any. */
+  releaseCameraMode(): void {
+    this.activeCameraMode?.stop();
+  }
+
+  /** Hear when the active exclusive 3D camera navigation mode changes. Returns an unsubscribe. */
+  onCameraModeChange(listener: (mode: string | null) => void): () => void {
+    this.cameraModeListeners.add(listener);
+    return () => this.cameraModeListeners.delete(listener);
+  }
+
+  private notifyCameraMode(mode: string | null): void {
+    if (!this.cameraModeListeners) return;
+    for (const listener of this.cameraModeListeners) listener(mode);
+  }
+
+  private finishWalk(): void {
+    if (!this.walkOn) return;
+    this.walkOn = false;
+    this.releaseWalkMode = null;
+    this.controls.walking = false;
+    this.walk.releaseAll();
+    for (const listener of this.walkListeners) listener(false);
+  }
+
+  /**
    * Walk the model with the keyboard: W A S D move the eye on the ground
    * plane, the way the view faces; E and Q raise and lower it. While walking,
    * a drag turns the view where the eye stands. It is a mode the host turns on
    * and off (its Walk button, a key) and reports the keys for (`walkKey`):
    * the letters are the host's own shortcuts the rest of the time. There is
-   * nothing to walk in plan, where it stays off.
+   * nothing to walk in plan or orthographic projection, where it stays off.
    */
   setWalk(on: boolean): void {
-    const next = on && this.mode === "3d";
+    const next = on && this.mode === "3d" && this.projection === "perspective" && !this.paused && !this.disposed;
     if (next === this.walkOn) return;
-    this.walkOn = next;
-    this.controls.walking = next;
-    if (!next) this.walk.releaseAll();
-    for (const listener of this.walkListeners) listener(next);
+    if (next) {
+      this.releaseWalkMode = this.claimCameraMode("walk", () => this.finishWalk());
+      this.walkOn = true;
+      this.controls.walking = true;
+      for (const listener of this.walkListeners) listener(true);
+      return;
+    }
+    const release = this.releaseWalkMode;
+    this.finishWalk();
+    release?.();
   }
 
   walking(): boolean {
@@ -1920,6 +2007,7 @@ export class ModelViewer3D {
    * the host's slider set it; it outlasts the walk itself.
    */
   setWalkSpeed(scale: number): void {
+    if (!Number.isFinite(scale)) return;
     const next = THREE.MathUtils.clamp(scale, WALK_SPEED_SCALE_MIN, WALK_SPEED_SCALE_MAX);
     if (next === this.walk.speedScale) return;
     this.walk.speedScale = next;
@@ -1940,13 +2028,15 @@ export class ModelViewer3D {
   /** One frame of a walk, before the controls update: how far the held keys carry the eye and the orbit point together. */
   private stepWalk(delta: number) {
     // Navigation is off (an overlay is dragging a grip): the eye holds, keys held or not.
-    if (!this.controls.enabled) return;
+    if (!this.controls.enabled || !Number.isFinite(delta) || delta <= 0) return;
     // No walk on and no speed left to ease out.
     if (!this.walkOn && this.walk.resting) return;
     // A long frame (the tab was away, a stall) is one short step, not a leap.
     const step = Math.min(delta, WALK_MAX_FRAME_SECONDS);
     // The camera never rolls (its up is the world's up), so its screen-right lies on the ground plane, and facing is screen-up on that plane.
-    this.walkRight.set(1, 0, 0).applyQuaternion(this.camera().quaternion).setY(0).normalize();
+    this.walkRight.set(1, 0, 0).applyQuaternion(this.camera().quaternion).setY(0);
+    if (this.walkRight.lengthSq() <= 1e-12) return;
+    this.walkRight.normalize();
     this.walkForward.crossVectors(WALK_UP, this.walkRight);
     const by = this.walk.step(step, this.walkForward, this.walkRight, this.controls.distance, this.walkStep);
     this.controls.walkBy(by);
@@ -2844,6 +2934,8 @@ export class ModelViewer3D {
       this.planFootprintsIdle = null;
     }
     this.disposed = true;
+    this.releaseCameraMode();
+    this.cameraModeListeners.clear();
     this.stopWalkOnBlur();
     this.walkListeners.clear();
     this.walkSpeedListeners.clear();

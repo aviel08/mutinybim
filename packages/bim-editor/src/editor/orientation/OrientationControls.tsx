@@ -144,22 +144,31 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant={walking ? 'secondary' : 'ghost'}
-              size="icon-sm"
-              aria-label="Walk the model"
-              aria-pressed={walking}
-              data-testid="orientation-walk"
-              onClick={(e) => {
-                viewer.setWalk(!walking)
-                // The keyboard belongs to the walk now: Space must not press this button again.
-                e.currentTarget.blur()
-              }}
-            >
-              <Footprints />
-            </Button>
+            <span>
+              <Button
+                variant={walking ? 'secondary' : 'ghost'}
+                size="icon-sm"
+                disabled={projection === 'orthographic'}
+                aria-label="Walk the model"
+                aria-pressed={walking}
+                data-testid="orientation-walk"
+                onClick={(e) => {
+                  viewer.setWalk(!walking)
+                  // The keyboard belongs to the walk now: Space must not press this button again.
+                  e.currentTarget.blur()
+                }}
+              >
+                <Footprints />
+              </Button>
+            </span>
           </TooltipTrigger>
-          <TooltipContent>{walking ? 'Walking: drag to look around. Right-button + scroll sets the speed. Esc stops.' : 'Walk: W A S D move, E and Q go up and down, drag to look around (W)'}</TooltipContent>
+          <TooltipContent>
+            {projection === 'orthographic'
+              ? `Walk mode needs perspective projection. Switch to perspective (${PROJECTION_SHORTCUT}) to walk.`
+              : walking
+                ? 'Walking: drag to look around. Right-button + scroll sets the speed. Esc stops.'
+                : 'Walk: W A S D move, E and Q go up and down, drag to look around (W)'}
+          </TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -293,7 +302,13 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
       </div>
       {/* Only while walking: the pace, as a multiple of the distance-led speed. The slider works in log terms, so its middle is 100% and every step feels the same. */}
       {walking && (
-        <div className="w-44 rounded-md border bg-background/95 p-1.5 shadow-sm" data-testid="orientation-walk-speed">
+        <div
+          className="w-44 rounded-md border bg-background/95 p-1.5 shadow-sm"
+          data-testid="orientation-walk-speed"
+          onKeyDown={(e) => {
+            if (SLIDER_ADJUST_KEYS.has(e.key)) e.stopPropagation()
+          }}
+        >
           <div className="flex items-center justify-between gap-2 pb-1">
             <span className="text-xs font-normal text-muted-foreground">Walk speed</span>
             <span className="font-mono text-xs text-muted-foreground">{Math.round(speed * 100)}%</span>

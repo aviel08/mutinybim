@@ -9,7 +9,7 @@ import { AUTO_TAG_CATEGORIES, ORGANIZATION_ZONE, elementsOfKind, lockOf, planAut
 import type { ConnectionStatus, Presence, SaveState } from '@permitzip/bim-sync'
 import { type ConnectionProblem } from './operator-messages'
 import { SHEET_FIRM_NAME, type SheetTitle } from '../contracts/building-model/sheet-title'
-import { panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
+import { BUTTONS_RIGHT, panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
 import type { LoadedReference, ModelViewer3D, Pick as ViewerPick, SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import { elevationCut, kernelToScene, livePlanCutMm, liveView, type Projection } from '@permitzip/bim-viewer-3d/light'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
@@ -2088,19 +2088,24 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else requestDelete(toDelete.id)
         return
       }
-      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
-      if (showDrawing) return
+      // Drawings and open schedule grids handle their own keyboard navigation and Escape.
+      if (showDrawing || scheduleGridOpen) return
       // Walking the 3D view with W A S D, E and Q (`walk-keys.ts`): the camera has those keys, and Esc leaves the walk before anything else.
       const walker = session?.viewer
       if (walker) {
         const walk = walkKeyAction(e, walker.walking())
-        if (walk === 'start' || walk === 'move') {
+        if (walk === 'start') {
+          if (live3dOpen && projection === 'perspective') {
+            e.preventDefault()
+            walker.setWalk(true)
+            walker.walkKey(e.code, true)
+            return
+          }
+        } else if (walk === 'move') {
           e.preventDefault()
-          if (walk === 'start') walker.setWalk(true)
           walker.walkKey(e.code, true)
           return
-        }
-        if (walk === 'stop') {
+        } else if (walk === 'stop') {
           e.preventDefault()
           walker.setWalk(false)
           return
@@ -2114,8 +2119,6 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           return
         }
       }
-      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
-      if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if ((e.key === 'a' || e.key === 'A') && canEdit && selection?.kind === 'authored' && (selection.element.kind === 'run_segment' || selection.element.kind === 'run_fitting')) {
           e.preventDefault()
@@ -2262,7 +2265,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [arbiter, finishDrag, tool, selection, chooseTool, requestDelete, requestGroupDelete, runUndo, showDrawing, drawingSection, canEdit, routeChoices, chooseRoute, offsetArmed, inheritArmed, routeLike, stopPlannedPlacing, finishRouteAfterClicks])
+  }, [arbiter, finishDrag, tool, selection, chooseTool, requestDelete, requestGroupDelete, runUndo, showDrawing, scheduleGridOpen, live3dOpen, projection, drawingSection, canEdit, routeChoices, chooseRoute, offsetArmed, inheritArmed, routeLike, stopPlannedPlacing, finishRouteAfterClicks])
   const createView = useCallback(
     async (viewType: Exclude<CreatableViewType, 'section'>, input: { name: string; level: string | null; scale: number }): Promise<string | null> => {
       const viewer = sessionRef.current?.viewer
@@ -3495,6 +3498,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               const at = { x: e.clientX - rect.left, y: e.clientY - rect.top }
               if (selection) setContextMenu(at)
               else void sessionRef.current?.selectAt(e.clientX, e.clientY).then(() => setContextMenu(at))
+            }}
+            onWheelCapture={(e) => {
+              // Right-button + scroll adjusts walk speed while walking: release must not open the right-click menu.
+              if (rightDownAt.current && (e.buttons & BUTTONS_RIGHT) !== 0 && sessionRef.current?.viewer?.walking()) {
+                rightDownAt.current = null
+              }
             }}
             onContextMenu={(e) => e.preventDefault()}
             onDoubleClick={(e) => void orbitClicks.doubleClicked(sessionRef.current?.viewer, e.clientX, e.clientY, { tool, planOpen })}
