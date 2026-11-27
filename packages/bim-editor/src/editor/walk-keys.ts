@@ -18,4 +18,4 @@ export function walkKeyAction(key: { readonly code: string; readonly key: string
 }
 
 /** The live hint while the walk holds. */
-export const WALKING_HINT = 'Walking: W A S D move, E and Q go up and down, drag to look around. Esc stops.'
+export const WALKING_HINT = 'Walking: W A S D move, E and Q go up and down, drag to look around, right-button + scroll for speed. Esc stops.'

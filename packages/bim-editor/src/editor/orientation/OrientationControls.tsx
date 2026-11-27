@@ -47,7 +47,7 @@ const RAD_TO_DEG = 180 / Math.PI
 const SLIDER_ADJUST_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'])
 
 interface Props {
-  readonly viewer: Pick<ModelViewer3D, 'orientation' | 'onCameraChange' | 'orientTo' | 'orbitBy' | 'frame' | 'camera3dState' | 'setFovDeg' | 'walking' | 'setWalk' | 'onWalkChange'>
+  readonly viewer: Pick<ModelViewer3D, 'orientation' | 'onCameraChange' | 'orientTo' | 'orbitBy' | 'frame' | 'camera3dState' | 'setFovDeg' | 'walking' | 'setWalk' | 'onWalkChange' | 'walkSpeed' | 'setWalkSpeed' | 'onWalkSpeedChange'>
   /** Space to leave on the right (the properties panel), px. */
   readonly rightInset: number
   readonly canCreateViews: boolean
@@ -78,8 +78,11 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
   const [fovDeg, setFovDeg] = useState(() => viewer.camera3dState()?.fovDeg ?? 45)
   /** Whether the walk holds: pressed while W A S D walk the camera (it also starts from the keyboard, so the viewer is the one to ask). */
   const [walking, setWalking] = useState(() => viewer.walking())
+  /** The walk's pace, as the slider shows it (the wheel turns it too, so the viewer is the one to ask). */
+  const [speed, setSpeed] = useState(() => viewer.walkSpeed())
 
   useEffect(() => viewer.onWalkChange(setWalking), [viewer])
+  useEffect(() => viewer.onWalkSpeedChange(setSpeed), [viewer])
 
   const follow = useCallback(() => {
     const o = viewer.orientation()
@@ -156,7 +159,7 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
               <Footprints />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{walking ? 'Walking: drag to look around. Esc stops.' : 'Walk: W A S D move, E and Q go up and down, drag to look around (W)'}</TooltipContent>
+          <TooltipContent>{walking ? 'Walking: drag to look around. Right-button + scroll sets the speed. Esc stops.' : 'Walk: W A S D move, E and Q go up and down, drag to look around (W)'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -288,6 +291,27 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {/* Only while walking: the pace, as a multiple of the distance-led speed. The slider works in log terms, so its middle is 100% and every step feels the same. */}
+      {walking && (
+        <div className="w-44 rounded-md border bg-background/95 p-1.5 shadow-sm" data-testid="orientation-walk-speed">
+          <div className="flex items-center justify-between gap-2 pb-1">
+            <span className="text-xs font-normal text-muted-foreground">Walk speed</span>
+            <span className="font-mono text-xs text-muted-foreground">{Math.round(speed * 100)}%</span>
+          </div>
+          <Slider
+            value={[Math.log10(speed)]}
+            min={-1}
+            max={1}
+            step={0.05}
+            aria-label="Walk speed"
+            onValueChange={(values) => {
+              const next = values[0]
+              if (next === undefined) return
+              viewer.setWalkSpeed(Math.pow(10, next))
+            }}
+          />
+        </div>
+      )}
       {(onTop || side) && (
         <Tooltip>
           <TooltipTrigger asChild>

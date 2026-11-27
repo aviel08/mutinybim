@@ -43,9 +43,10 @@ describe('the walk keys on the Building Model surface', () => {
     }
   })
 
-  it('the hint names the keys and the way out', () => {
+  it('the hint names the keys, the speed wheel and the way out', () => {
     expect(WALKING_HINT).toContain('W A S D')
     expect(WALKING_HINT).toContain('E and Q')
+    expect(WALKING_HINT).toContain('right-button + scroll')
     expect(WALKING_HINT).toContain('Esc stops')
   })
 })

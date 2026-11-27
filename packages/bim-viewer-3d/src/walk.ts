@@ -22,6 +22,13 @@ export function walkSpeedFor(radius: number): number {
   return THREE.MathUtils.clamp(radius / WALK_SECONDS_TO_ORBIT_POINT, WALK_SLOWEST, WALK_FASTEST);
 }
 
+/** The pace multiplier's lowest setting (a tenth of the distance-led speed). */
+export const WALK_SPEED_SCALE_MIN = 0.1;
+/** The pace multiplier's highest setting (ten times the distance-led speed). */
+export const WALK_SPEED_SCALE_MAX = 10;
+/** One scroll notch with the right button held multiplies the pace by 10 to this power (about 1.26). The slider steps half of it. */
+export const WALK_SPEED_WHEEL_LOG_STEP = 0.1;
+
 /**
  * Let the keys go whenever the window loses focus: a key held at that moment
  * never comes up, and nothing may keep walking. Returns the unsubscribe.
@@ -40,6 +47,8 @@ export function releaseWalkOnBlur(walk: WalkMotion, target: Window): () => void 
 export class WalkMotion {
   private readonly held = new Set<WalkKey>();
   private readonly velocity = new THREE.Vector3();
+  /** The person's pace as a multiple of the distance-led speed (`walkSpeedFor`), 1 by default. The right-button wheel and the host's slider set it. */
+  speedScale = 1;
 
   hold(key: WalkKey): void {
     this.held.add(key);
@@ -80,7 +89,7 @@ export class WalkMotion {
     if (this.held.has("up")) out.y += 1;
     if (this.held.has("down")) out.y -= 1;
     // Forward and right together go the same speed as forward alone.
-    if (out.lengthSq() > 0) out.normalize().multiplyScalar(walkSpeedFor(orbitRadius));
+    if (out.lengthSq() > 0) out.normalize().multiplyScalar(walkSpeedFor(orbitRadius) * this.speedScale);
     this.velocity.lerp(out, 1 - Math.exp(-delta / WALK_EASE_SECONDS));
     if (this.held.size === 0 && this.resting) this.velocity.set(0, 0, 0);
     return out.copy(this.velocity).multiplyScalar(delta);

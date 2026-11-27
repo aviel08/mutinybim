@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import CameraControls from "camera-controls";
-import { panButtonOf } from "./pan-buttons";
+import { panButtonOf, BUTTONS_RIGHT } from "./pan-buttons";
 import { wheelZoomLog, type WheelDelta } from "./wheel-zoom";
 
 CameraControls.install({ THREE });
@@ -77,6 +77,8 @@ export class PointZoomControls extends CameraControls {
   onPassThrough: (() => void) | null = null;
   /** A middle-button double-click: zoom extents, as in every flat view. */
   onZoomExtents: (() => void) | null = null;
+  /** While walking, a wheel notch with the right button held turned the pace: 1 is faster, −1 slower (it does not zoom). */
+  onWalkSpeed: ((direction: 1 | -1) => void) | null = null;
   private lastMiddle: { time: number; x: number; y: number } | null = null;
   private beforePassThrough: PassThroughFrame | null = null;
   /** The last surface point a wheel zoom went toward (scene metres). */
@@ -212,6 +214,11 @@ export class PointZoomControls extends CameraControls {
   private readonly onWheel = (event: WheelEvent) => {
     if (!this.enabled) return;
     event.preventDefault();
+    // Walking like a game: scroll with the right button held sets the pace. The wheel alone still zooms toward the pointer.
+    if (this.walkingMode && this.onWalkSpeed && (event.buttons & BUTTONS_RIGHT) !== 0) {
+      this.onWalkSpeed(event.deltaY < 0 ? 1 : -1);
+      return;
+    }
     this.zoomAtPointer(event.clientX, event.clientY, wheelScale({ deltaY: event.deltaY, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey }));
   };
 

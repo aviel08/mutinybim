@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { OrientationControls } from '../src/editor/orientation/OrientationControls'
 import { TooltipProvider } from '../src/ui/tooltip'
 
@@ -27,6 +27,11 @@ function viewerWith() {
   const tell = () => {
     for (const listener of listeners) listener(walking)
   }
+  const speedListeners = new Set<(scale: number) => void>()
+  let speedScale = 1
+  const tellSpeed = () => {
+    for (const listener of speedListeners) listener(speedScale)
+  }
   return {
     orientation: () => ({ azimuth: 0.6, polar: 1.05 }),
     onCameraChange: () => () => {},
@@ -43,11 +48,20 @@ function viewerWith() {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    walkSpeed: jest.fn(() => speedScale),
+    setWalkSpeed: jest.fn((scale: number) => {
+      if (scale === speedScale) return
+      speedScale = scale
+      tellSpeed()
+    }),
+    onWalkSpeedChange: (listener: (scale: number) => void) => {
+      speedListeners.add(listener)
+      return () => speedListeners.delete(listener)
+    },
   }
 }
 
-function renderControls() {
-  const viewer = viewerWith()
+function renderWith(viewer: ReturnType<typeof viewerWith>) {
   render(
     <TooltipProvider>
       <OrientationControls
@@ -64,6 +78,10 @@ function renderControls() {
     </TooltipProvider>,
   )
   return viewer
+}
+
+function renderControls() {
+  return renderWith(viewerWith())
 }
 
 const walkButton = () => screen.getByRole('button', { name: 'Walk the model' })
@@ -123,5 +141,50 @@ describe('the Walk switch on the view toolbar', () => {
       </TooltipProvider>,
     )
     expect(walkButton()).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('the walk speed slider under the Walk button', () => {
+  const speedPanel = () => screen.getByTestId('orientation-walk-speed')
+  const speedThumb = () => within(speedPanel()).getByRole('slider')
+
+  it('shows only while walking, reading the pace the viewer holds (100% by default)', () => {
+    renderControls()
+    expect(screen.queryByTestId('orientation-walk-speed')).toBeNull()
+    const preset = viewerWith()
+    act(() => preset.setWalk(true))
+    act(() => preset.setWalkSpeed(2.5))
+    renderWith(preset)
+    expect(speedPanel()).toHaveTextContent('Walk speed')
+    expect(speedPanel()).toHaveTextContent('250%')
+  })
+
+  it('appears when the walk starts and goes when it stops', () => {
+    const viewer = renderControls()
+    expect(screen.queryByTestId('orientation-walk-speed')).toBeNull()
+    act(() => viewer.setWalk(true))
+    expect(speedPanel()).toHaveTextContent('100%')
+    act(() => viewer.setWalk(false))
+    expect(screen.queryByTestId('orientation-walk-speed')).toBeNull()
+  })
+
+  it('the arrow keys step the pace and tell the viewer (each step about 12%)', () => {
+    const viewer = renderControls()
+    act(() => viewer.setWalk(true))
+    speedThumb().focus()
+    fireEvent.keyDown(speedThumb(), { key: 'ArrowRight' })
+    expect(viewer.setWalkSpeed).toHaveBeenLastCalledWith(Math.pow(10, 0.05))
+    // The stub tells its listeners, so the readout followed.
+    expect(speedPanel()).toHaveTextContent('112%')
+    fireEvent.keyDown(speedThumb(), { key: 'ArrowLeft' })
+    expect(viewer.setWalkSpeed).toHaveBeenLastCalledWith(1)
+    expect(speedPanel()).toHaveTextContent('100%')
+  })
+
+  it('follows the wheel turning the pace elsewhere (right-button + scroll on the canvas)', () => {
+    const viewer = renderControls()
+    act(() => viewer.setWalk(true))
+    act(() => viewer.setWalkSpeed(Math.pow(10, -0.2)))
+    expect(speedPanel()).toHaveTextContent('63%')
   })
 })

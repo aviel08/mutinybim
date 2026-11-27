@@ -39,7 +39,7 @@ import {
 import { ViewerPalette, type ViewerColors } from "./viewer-colors";
 import { matchCamera, orthoZoomFor, type Projection, type ViewCamera } from "./projection";
 import { makeCameraControls, pinOrbitPoint, zoomFloorFor, type PointZoomControls, type ZoomAnchorQuery } from "./navigation";
-import { releaseWalkOnBlur, WalkMotion } from "./walk";
+import { releaseWalkOnBlur, WALK_SPEED_SCALE_MAX, WALK_SPEED_SCALE_MIN, WALK_SPEED_WHEEL_LOG_STEP, WalkMotion } from "./walk";
 import { walkKeyOf } from "./walk-keys";
 import { NORMAL_REFERENCE_TONE, PICK_HIGHLIGHT_ID, baseMaterials, overlayMaterial, referenceMayWinPick, sameReferenceTone, toneMaterial, type ReferenceTone } from "./reference-tone";
 import { NO_INSETS, planFit, type FrameInsets } from "./plan-fit";
@@ -295,6 +295,7 @@ export class ModelViewer3D {
   /** A key held when the window loses focus never comes up: nothing keeps walking. */
   private readonly stopWalkOnBlur = releaseWalkOnBlur(this.walk, window);
   private readonly walkListeners = new Set<(walking: boolean) => void>();
+  private readonly walkSpeedListeners = new Set<(scale: number) => void>();
   private readonly walkStep = new THREE.Vector3();
   private readonly walkForward = new THREE.Vector3();
   private readonly walkRight = new THREE.Vector3();
@@ -579,6 +580,8 @@ export class ModelViewer3D {
     controls.zoomAnchor = this.zoomAnchorAt;
     controls.onPassThrough = () => this.emitPassThrough(true);
     controls.onZoomExtents = () => void this.frame().catch((err: unknown) => console.error("[ModelViewer3D] zoom extents failed", err));
+    // The pace wheel while walking: each notch is a step in log terms (about 1.26, up or down).
+    controls.onWalkSpeed = (direction) => this.setWalkSpeed(Math.pow(10, Math.log10(this.walk.speedScale) + direction * WALK_SPEED_WHEEL_LOG_STEP));
     // Fresh controls (plan / 3D / projection / plan-up) start with nothing to step back out of.
     this.emitPassThrough(false);
     controls.onZoomAnchor = () => {
@@ -1911,6 +1914,29 @@ export class ModelViewer3D {
     return () => this.walkListeners.delete(listener);
   }
 
+  /**
+   * The walk's pace as a multiple of the distance-led speed (`walkSpeedFor`):
+   * 0.1 to 10, 1 by default. The scroll wheel with the right button held and
+   * the host's slider set it; it outlasts the walk itself.
+   */
+  setWalkSpeed(scale: number): void {
+    const next = THREE.MathUtils.clamp(scale, WALK_SPEED_SCALE_MIN, WALK_SPEED_SCALE_MAX);
+    if (next === this.walk.speedScale) return;
+    this.walk.speedScale = next;
+    for (const listener of this.walkSpeedListeners) listener(next);
+  }
+
+  /** The walk's pace multiplier (1 = the distance-led speed). */
+  walkSpeed(): number {
+    return this.walk.speedScale;
+  }
+
+  /** Hear when the walk's pace changes. Returns an unsubscribe. */
+  onWalkSpeedChange(listener: (scale: number) => void): () => void {
+    this.walkSpeedListeners.add(listener);
+    return () => this.walkSpeedListeners.delete(listener);
+  }
+
   /** One frame of a walk, before the controls update: how far the held keys carry the eye and the orbit point together. */
   private stepWalk(delta: number) {
     // Navigation is off (an overlay is dragging a grip): the eye holds, keys held or not.
@@ -2820,6 +2846,7 @@ export class ModelViewer3D {
     this.disposed = true;
     this.stopWalkOnBlur();
     this.walkListeners.clear();
+    this.walkSpeedListeners.clear();
     this.surfacePicker.dispose();
     this.renderer.setAnimationLoop(null);
     this.resizeObserver.disconnect();

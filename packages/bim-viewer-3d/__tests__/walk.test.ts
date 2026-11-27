@@ -305,6 +305,118 @@ describe("WalkMotion", () => {
     expect(motion.resting).toBe(true);
     expect(motion.step(1 / 60, forward, right, RADIUS, out).length()).toBe(0);
   });
+
+  it("the pace multiplier scales every step", () => {
+    const one = new WalkMotion();
+    one.hold("forward");
+    const two = new WalkMotion();
+    two.speedScale = 2;
+    two.hold("forward");
+    let a = 0;
+    let b = 0;
+    for (let t = 0; t < 10; t += 1 / 60) {
+      a += one.step(1 / 60, forward, right, RADIUS, out).length();
+      b += two.step(1 / 60, forward, right, RADIUS, out).length();
+    }
+    expect(b).toBeCloseTo(a * 2, 6);
+  });
+});
+
+describe("the walk's pace", () => {
+  it("setWalkSpeed clamps to a tenth to ten times, reads back, and tells its listeners; the same value is not news", () => {
+    const { viewer: w } = viewer();
+    const heard: number[] = [];
+    w.onWalkSpeedChange((scale) => heard.push(scale));
+    w.setWalkSpeed(50);
+    expect(w.walkSpeed()).toBe(10);
+    w.setWalkSpeed(0.001);
+    expect(w.walkSpeed()).toBe(0.1);
+    w.setWalkSpeed(2.5);
+    expect(w.walkSpeed()).toBe(2.5);
+    expect(heard).toEqual([10, 0.1, 2.5]);
+    w.setWalkSpeed(2.5);
+    expect(heard).toEqual([10, 0.1, 2.5]);
+  });
+
+  it("the pace outlasts the walk itself", () => {
+    const { viewer: w } = viewer();
+    w.setWalk(true);
+    w.setWalkSpeed(3);
+    w.setWalk(false);
+    w.setWalk(true);
+    expect(w.walkSpeed()).toBe(3);
+  });
+
+  it("a quarter pace covers a quarter of the ground in the same frames", () => {
+    const slow = viewer();
+    slow.viewer.setWalk(true);
+    slow.viewer.setWalkSpeed(0.25);
+    slow.viewer.walkKey("KeyW", true);
+    const brisk = viewer();
+    brisk.viewer.setWalk(true);
+    brisk.viewer.walkKey("KeyW", true);
+    frames(slow.viewer, slow.controls, 1);
+    frames(brisk.viewer, brisk.controls, 1);
+    const dSlow = slow.camera.position.distanceTo(EYE);
+    const dBrisk = brisk.camera.position.distanceTo(EYE);
+    expect(dSlow).toBeGreaterThan(0.5);
+    expect(dSlow).toBeCloseTo(dBrisk / 4, 2);
+  });
+});
+
+describe("the pace wheel (right-button + scroll) while walking", () => {
+  function notch(el: HTMLElement, deltaY: number, buttons: number) {
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY, deltaMode: 0, buttons, clientX: 400, clientY: 300, bubbles: true, cancelable: true }));
+  }
+
+  function paceRig() {
+    const { el, camera, controls } = rig();
+    const heard: (1 | -1)[] = [];
+    controls.onWalkSpeed = (direction) => heard.push(direction);
+    controls.walking = true;
+    controls.update(0);
+    return { el, camera, controls, heard };
+  }
+
+  it("a notch with the right button held turns the pace, and does not zoom", () => {
+    const { el, camera, heard } = paceRig();
+    notch(el, -100, 2);
+    notch(el, -100, 2);
+    expect(heard).toEqual([1, 1]);
+    expect(camera.position.distanceTo(EYE)).toBeLessThan(1e-9);
+    notch(el, 100, 2);
+    expect(heard).toEqual([1, 1, -1]);
+  });
+
+  it("the wheel alone still zooms toward the pointer, and the pace stands", () => {
+    const { el, camera, controls, heard } = paceRig();
+    const radius = camera.position.distanceTo(target(controls));
+    notch(el, -100, 0);
+    settle(controls);
+    expect(heard).toEqual([]);
+    expect(camera.position.distanceTo(target(controls))).toBeLessThan(radius - 1);
+  });
+
+  it("not walking, the right-button wheel zooms as always and nobody hears a pace", () => {
+    const { el, camera, controls } = rig();
+    const heard: (1 | -1)[] = [];
+    controls.onWalkSpeed = (direction) => heard.push(direction);
+    const radius = camera.position.distanceTo(target(controls));
+    notch(el, -100, 2);
+    settle(controls);
+    expect(heard).toEqual([]);
+    expect(camera.position.distanceTo(target(controls))).toBeLessThan(radius - 1);
+  });
+
+  it("walking switched off, the right-button wheel zooms again", () => {
+    const { el, camera, controls, heard } = paceRig();
+    controls.walking = false;
+    const radius = camera.position.distanceTo(target(controls));
+    notch(el, -100, 2);
+    settle(controls);
+    expect(heard).toEqual([]);
+    expect(camera.position.distanceTo(target(controls))).toBeLessThan(radius - 1);
+  });
 });
 
 /** The viewer's walk methods over real controls (no WebGL renderer is needed to walk). */
@@ -313,6 +425,9 @@ interface Walker {
   walking(): boolean;
   walkKey(code: string, down: boolean): boolean;
   onWalkChange(listener: (walking: boolean) => void): () => void;
+  setWalkSpeed(scale: number): void;
+  walkSpeed(): number;
+  onWalkSpeedChange(listener: (scale: number) => void): () => void;
   releaseWalkKeys(): void;
   stepWalk(delta: number): void;
 }
@@ -329,6 +444,7 @@ function viewer(opts: { mode?: "3d" | "plan" } = {}): { viewer: Walker; camera: 
     walkOn: false,
     walk: new WalkMotion(),
     walkListeners: new Set<(walking: boolean) => void>(),
+    walkSpeedListeners: new Set<(scale: number) => void>(),
     walkStep: new THREE.Vector3(),
     walkForward: new THREE.Vector3(),
     walkRight: new THREE.Vector3(),
